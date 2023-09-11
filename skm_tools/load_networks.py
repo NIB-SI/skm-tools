@@ -85,6 +85,7 @@ def ckn_to_networkx(
         edge_path=None,
         node_path=None,
         add_reciprocal_edges=True,
+        directed=False,
         create_using=nx.DiGraph
     ):
     ''' Load CKN from the compressed edge list format to a
@@ -114,6 +115,10 @@ def ckn_to_networkx(
         becomes
             A-->B (undirected)
             B-->A (undirected)
+
+    directed : bool
+        Whether to remove undirected edges from CKN
+        (in contrast to add_reciprocal_edges, and not meant to be used together)
 
 
     '''
@@ -166,18 +171,15 @@ def ckn_to_networkx(
                     ])
 
     if node_compressed:
-        node_df = pd.read_csv(node_path, sep="\t", compression="gzip")
+        node_df = pd.read_csv(node_path, na_values=[''], keep_default_na=False, sep="\t", compression="gzip")
     else:
-        node_df = pd.read_csv(node_path, sep="\t")
-
-    # node_df.drop_duplicates(subset=["nodeID"], keep="first", inplace=True)
-    # node_df['identifier'] = node_df['nodeID']
+        node_df = pd.read_csv(node_path, na_values=[''], keep_default_na=False, sep="\t")
 
     node_df.set_index("node_ID", inplace=True)
 
     clean_list = lambda x: [y.strip() for y in x.split("|")] if not pd.isna(x) else None
-    node_df["GMM"] = node_df["GMM"].apply(clean_list)
-    node_df["synonyms"] = node_df["synonyms"].apply(clean_list)
+    for attr in ["GMM", "synonyms", "tissue"]:
+        node_df[attr] = node_df[attr].apply(clean_list)
 
     nx.set_node_attributes(g, node_df.to_dict('index'))
 
@@ -188,6 +190,12 @@ def ckn_to_networkx(
                 edges_to_add.append((v, u, data))
     _ = g.add_edges_from(edges_to_add)
 
+    if directed:
+        to_remove = [(u,v) for u, v, d in g.edges(data=True,) if d["isDirected"]==0]
+        g.remove_edges_from(to_remove)
 
+        # remove isolates resulting from filtering
+        isolates = list(nx.isolates(g))
+        g.remove_nodes_from(isolates)
 
     return g

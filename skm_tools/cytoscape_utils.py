@@ -30,16 +30,7 @@ def apply_builtin_style(suid, style):
     p4c.styles.set_visual_style(style_name, network=suid)
     print(f"Applied {style_name} to {suid}")
 
-def highlight_nodes(
-        node_names,
-        colour=None,
-        label_color=None,
-        border_color=None,
-        border_width=None,
-        node_height=None,
-        node_width=None,
-        network=None
-    ):
+def highlight_nodes(node_names, colour=None, label_color=None, border_color=None, border_width=None, node_height=None, node_width=None, network=None):
     '''
     Highlight nodes in a Cytoscape networks using style bypasses.
     '''
@@ -94,27 +85,14 @@ def highlight_nodes(
 
     p4c.styles.set_visual_style(og_style)
 
-
-def highlight_path(
-        node_names,
-        colour,
-        skip_nodes=None,
-        skip_edges=None,
-        label_color="white",
-        border_color="black",
-        border_width=10,
-        edge_line_width=10,
-        network=None
-    ):
+def highlight_path(node_names, colour, skip_nodes=None, skip_edges=None, label_color="white", border_color="black", border_width=10, edge_line_width=10, network=None):
     '''Bypasses
     '''
 
     if isinstance(skip_nodes, Sequence) and not isinstance(skip_nodes, str):
-        node_names_colour = [n for n in node_names if not n in skip_nodes]
-    else:
-        node_names_colour = node_names
+        node_names = [n for n in node_names if not n in skip_nodes]
 
-    if len(node_names_colour) == 0:
+    if len(node_names) == 0:
         print("No more nodes to colour")
         return [], []
 
@@ -130,8 +108,20 @@ def highlight_path(
         network=network
     )
 
-    edges = []
+    edge_pairs = []
     for s, t in zip(node_names, node_names[1:]):
+        edge_pairs.append((s, t))
+    edges = highlight_edges(edge_pairs, colour, skip_edges=skip_edges, edge_line_width=edge_line_width, network=network)
+
+    return node_names, edges
+
+def highlight_edges(edge_pairs, colour, skip_edges=None, edge_line_width=10, network=None):
+
+    if skip_edges is None:
+        skip_edges = []
+
+    edges = []
+    for s, t in edge_pairs:
         e = f"{s} (interacts with) {t}"
         if not (e in skip_edges):
             edges.append(e)
@@ -142,7 +132,7 @@ def highlight_path(
     p4c.style_bypasses.set_edge_line_width_bypass(edges_by_suid, edge_line_width, network=network)
     p4c.style_bypasses.set_edge_color_bypass(edges_by_suid, colour, network=network)
 
-    return node_names, edges
+    return edges
 
 def get_path_edges(paths, g):
     '''path [a, b, c] --> edges along path [(a, b), (b, c)]
@@ -165,9 +155,7 @@ def get_path_edges(paths, g):
 
     return edges, cytoscape_edges
 
-def subnetwork_edge_induced_from_paths(
-        paths, g, parent_suid, name="subnetwork (edge induced)"
-    ):
+def subnetwork_edge_induced_from_paths(paths, g, parent_suid, name="subnetwork (edge induced)"):
 
     '''Subnetwork from existing Cytosape network.
 
@@ -192,8 +180,6 @@ def subnetwork_edge_induced_from_paths(
 
     _, cytoscape_edges = get_path_edges(paths, g)
 
-
-
     network_suid = p4c.networks.create_subnetwork(
         nodes=all_path_nodes,
         edges=cytoscape_edges,
@@ -205,10 +191,8 @@ def subnetwork_edge_induced_from_paths(
 
     return network_suid
 
-def subnetwork_node_induced(
-        nodes, parent_suid, name="subnetwork (node induced)"
-    ):
-    '''Subnetwork from existing Cytosape network.
+def subnetwork_node_induced(nodes, parent_suid, name="subnetwork (node induced)"):
+    '''Subnetwork from existing Cystoscape network.
     '''
 
     escaped_names = _cytoscape_safe_names(set(nodes))
@@ -227,9 +211,7 @@ def subnetwork_node_induced(
 
     return network_suid
 
-def subnetwork_neighbours(
-        nodes, parent_suid, name="subnetwork (1st neighbours)"
-    ):
+def subnetwork_neighbours(nodes, parent_suid, name="subnetwork (1st neighbours)"):
     ''' Will be node-induced
     '''
 
@@ -257,15 +239,7 @@ def contrast_colour(colour):
     complementary_colour = 0xffffff-rgb
     return f'#{complementary_colour:06X}'
 
-def apply_shortest_paths_style(
-        sources,
-        path_lists,
-        target,
-        g,
-        edge_colors=None,
-        node_colors=None,
-        network=None
-    ):
+def apply_shortest_paths_style(sources, path_lists, target, g, edge_colors=None, node_colors=None, network=None ):
     '''Generate a style showing shortest paths, from multiple queries
 
     Parameters
@@ -362,6 +336,78 @@ def apply_shortest_paths_style(
     p4c.styles.set_visual_style(new_style)
 
 
+def layout_from_coords(network, table):
+    '''
+    network : int
+        Cytoscape suid, where to apply the layout
+    table: DataFrame
+        Pandas DataFrame, index as node names, and columns 'x' and 'y' with coordinates
+
+    '''
+
+    p4c.load_table_data(table, network=network)
+
+    current_style = p4c.styles.get_current_style(network=network)
+
+    tmp_style = 'tmp-layout'
+    p4c.copy_visual_style(current_style, tmp_style)
+    p4c.set_visual_style(tmp_style, network=network)
+
+    p4c.update_style_mapping(tmp_style, p4c.map_visual_property('NODE_X_LOCATION', 'x', 'p'))
+    p4c.update_style_mapping(tmp_style, p4c.map_visual_property('NODE_Y_LOCATION', 'y', 'p'))
+
+    p4c.delete_visual_style(tmp_style)
+
+    p4c.tables.delete_table_column('x')
+    p4c.tables.delete_table_column('y')
+
+    p4c.set_visual_style(current_style, network=network)
+
+def add_custom_png(network, create_png, style=None):
+    '''
+    network : int
+        Cytoscape suid, where to apply the layout
+    create_png: function
+        function that creates a png per node
+
+    '''
+
+    nodes = p4c.get_all_nodes(network=network)
+
+    node_pngs = {}
+    for node in nodes:
+        node_png_fname = create_png(node)
+        if node_png_fname:
+            node_pngs[node] = {'fig_location':f"file:{str(node_png_fname.absolute())}"}
+
+    table = pd.DataFrame.from_dict(node_pngs, orient='index')
+
+    if style is None:
+        style = p4c.styles.get_current_style(network=network)
+
+    p4c.load_table_data(table, network=network)
+    p4c.style_dependencies.sync_node_custom_graphics_size(False, style_name=style)
+
+    style_mapping = p4c.style_mappings.map_visual_property(
+        visual_prop="NODE_CUSTOMGRAPHICS_1",
+        table_column="fig_location",
+        mapping_type="p",
+    )
+    p4c.style_mappings.update_style_mapping(style, style_mapping)
+
+    p4c.style_defaults.set_visual_property_default({
+        'visualProperty':'NODE_CUSTOMGRAPHICS_POSITION_1',
+        'value':'S,N,c,0.00,10.00'},
+        style_name=style
+    )
+
+    p4c.style_defaults.set_visual_property_default({
+        'visualProperty':'NODE_CUSTOMGRAPHICS_SIZE_1',
+        'value':110},
+        style_name=style
+    )
+
+
 def export_network(network, filename, format="PDF"):
 
     # fit content ignores edges that may extend
@@ -375,6 +421,7 @@ def export_network(network, filename, format="PDF"):
         type=format,
         network=network,
         overwrite_file=True,
+        resolution=600
         # all_graphics_details=True,
         # hide_labels=False
     )
@@ -386,21 +433,27 @@ def export_collection_to_pdf(collection_suid, filename, font_size=20, font='Helv
     from pdfCropMargins import crop
 
     from reportlab.pdfgen import canvas
-    from reportlab.pdfbase.pdfmetrics import _fonts as rtl_fonts
-    font_obj = rtl_fonts['Helvetica']
 
     def create_text_pdf(text, mb, font, font_size):
 
-        text_width = rtl_fonts['Helvetica'].stringWidth(text, size=font_size)
+        packet = io.BytesIO()
+
+        can = canvas.Canvas(packet, pagesize=(mb.width, mb.height))
+        try:
+            can.setFont(font, font_size)
+        except KeyError as e:
+            print(f"Font {font} not available. Using {can._fontname}. ")
+            font = can._fontname
+            can.setFont(font, font_size)
+
+        text_width = canvas.pdfmetrics._fonts[font].stringWidth(text, size=font_size)
+        # rtl_fonts['Helvetica'].stringWidth(text, size=font_size)
 
         center = (mb.right - mb.left)/2 + mb.left
         text_left = center - text_width/2
         bottom = mb.bottom + font_size/4
 
-        packet = io.BytesIO()
 
-        can = canvas.Canvas(packet, pagesize=(mb.width, mb.height))
-        can.setFont(font, font_size)
         can.drawString(text_left, bottom, text)
         can.save()
 

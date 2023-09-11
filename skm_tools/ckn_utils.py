@@ -49,6 +49,7 @@ def filter_ckn_nodes(
         g,
         node_types=None,
         species=None,
+        tissues=None,
         remove_isolates=True
     ):
     '''
@@ -73,6 +74,12 @@ def filter_ckn_nodes(
         wrong_type = [n for n, data in g.nodes(data=True) if not (data['node_type'] in node_types)]
         to_remove.update(wrong_type)
         reasons = {**reasons, **{n:"wrong node type" for n in wrong_type if not n in reasons}}
+
+    if tissues:
+        wrong_tissue = [n for n, data in g.nodes(data=True) if ( not data['tissue'] ) or ( not (len([aa for aa in data['tissue'] if aa in tissues])>0) )]
+        to_remove.update(wrong_tissue)
+        reasons = {**reasons, **{n:"wrong tissue type" for n in wrong_tissue if not n in reasons}}
+
 
     # now remove complexes that contain any nodes to be removed entities
     as_components = []
