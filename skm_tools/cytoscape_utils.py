@@ -83,7 +83,7 @@ def highlight_nodes(node_names, colour=None, label_color=None, border_color=None
             network=network
         )
 
-    p4c.styles.set_visual_style(og_style)
+    p4c.styles.set_visual_style(og_style, network=network)
 
 def highlight_path(node_names, colour, skip_nodes=None, skip_edges=None, label_color="white", border_color="black", border_width=10, edge_line_width=10, network=None):
     '''Bypasses
@@ -368,7 +368,7 @@ def add_custom_png(network, create_png, style=None):
     network : int
         Cytoscape suid, where to apply the layout
     create_png: function
-        function that creates a png per node
+        function that creates a png per node and returns png file path
 
     '''
 
