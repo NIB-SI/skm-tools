@@ -177,9 +177,9 @@ def ckn_to_networkx(
 
     node_df.set_index("node_ID", inplace=True)
 
-    clean_list = lambda x: [y.strip() for y in x.split("|")] if not pd.isna(x) else None
-    for attr in ["GMM", "synonyms", "tissue"]:
-        node_df[attr] = node_df[attr].apply(clean_list)
+    clean_list = lambda x, delim: [y.strip() for y in x.split(delim)] if not pd.isna(x) else None
+    for attr, delim in [("GMM", "|"), ("synonyms", "|"), ("tissue", ",")]:
+        node_df[attr] = node_df[attr].apply(clean_list, delim=delim)
 
     nx.set_node_attributes(g, node_df.to_dict('index'))
 

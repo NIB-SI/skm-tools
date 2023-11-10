@@ -212,7 +212,7 @@ def subnetwork_node_induced(nodes, parent_suid, name="subnetwork (node induced)"
     return network_suid
 
 def subnetwork_neighbours(nodes, parent_suid, name="subnetwork (1st neighbours)"):
-    ''' Will be node-induced
+    ''' Node-induced neighbourhood of `nodes`.
     '''
 
     escaped_names = _cytoscape_safe_names(set(nodes))
@@ -234,7 +234,7 @@ def subnetwork_neighbours(nodes, parent_suid, name="subnetwork (1st neighbours)"
     return network_suid
 
 def contrast_colour(colour):
-    '''To contrast lable to node colours'''
+    '''To contrast label to node colours'''
     rgb = int(colour.lstrip('#'), 16)
     complementary_colour = 0xffffff-rgb
     return f'#{complementary_colour:06X}'
