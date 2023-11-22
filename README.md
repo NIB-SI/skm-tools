@@ -1,7 +1,13 @@
 # skm-tools
 Scripts and utilities for leveraging SKM resources
 
-SKM-tools ( https://github.com/NIB-SI/skm-tools) is a collection of Python scripts and notebooks, incorporating network analysis and visualisation tools, that facilitates interrogation of CKN and PSS with targeted questions beyond the scope of the web application. Included are demonstrations of:
+Stress Knowledge Map (SKM) is a knowledge graph resource for systems biology analysis of plant stress responses. SKM contains knowledge on molecular interactions in plants which have been integrated from a wide diversity of sources into a single, freely available entrypoint. The two knowledge graphs in SKM are: 
+* The Plant Stress Signalling model (PSS) -- a highly curated and detailed mechanistic plant stress signalling model, in majority compiled from targeted biochemical studies available in literature and containing over 500 interactions,
+* The Comprehensive Knowledge Network (CKN) -- a compilation of molecular interactions in the plant cell, in majority is based on high-throughput experiments, and contains over 26.000 molecules and 480.000 interactions.
+
+SKM is avalible at https://skm.nib.si, and provides tools for exploring both PSS and CKN. 
+
+SKM-tools (https://github.com/NIB-SI/skm-tools) is a collection of Python scripts and notebooks, incorporating network analysis and visualisation tools, that facilitates interrogation of CKN and PSS with targeted questions beyond the scope of the web application. Included are demonstrations of:
 
 1) Creating a networkX graph object – allowing access to the multitude of graph analysis and graph operation functions available in the networkX library,
 2) Network filtering – removing edges or nodes from the network that are not relevant to the biological question at hand,
