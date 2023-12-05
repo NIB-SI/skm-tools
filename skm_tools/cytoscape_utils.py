@@ -16,7 +16,7 @@ def _cytoscape_safe_names(names):
 def apply_builtin_style(suid, style):
     style = style.lower()
 
-    if not (style in resources.BUILTIN_STYLES):
+    if style not in resources.BUILTIN_STYLES:
         raise ValueError(f"apply_builtin_style expects a value in {resources.BUILTIN_STYLES}.")
 
     style_name = {
@@ -24,7 +24,7 @@ def apply_builtin_style(suid, style):
         'pss':resources.PSS_DEFAULT_STYLE
     }[style]
 
-    if not style_name in p4c.styles.get_visual_style_names():
+    if style_name not in p4c.styles.get_visual_style_names():
         p4c.import_visual_styles(resources.get_style_xml_path())
 
     p4c.styles.set_visual_style(style_name, network=suid)
@@ -90,7 +90,7 @@ def highlight_path(node_names, colour, skip_nodes=None, skip_edges=None, label_c
     '''
 
     if isinstance(skip_nodes, Sequence) and not isinstance(skip_nodes, str):
-        node_names = [n for n in node_names if not n in skip_nodes]
+        node_names = [n for n in node_names if n not in skip_nodes]
 
     if len(node_names) == 0:
         print("No more nodes to colour")
@@ -108,9 +108,7 @@ def highlight_path(node_names, colour, skip_nodes=None, skip_edges=None, label_c
         network=network
     )
 
-    edge_pairs = []
-    for s, t in zip(node_names, node_names[1:]):
-        edge_pairs.append((s, t))
+    edge_pairs = list(zip(node_names, node_names[1:]))
     edges = highlight_edges(edge_pairs, colour, skip_edges=skip_edges, edge_line_width=edge_line_width, network=network)
 
     return node_names, edges
@@ -123,7 +121,7 @@ def highlight_edges(edge_pairs, colour, skip_edges=None, edge_line_width=10, net
     edges = []
     for s, t in edge_pairs:
         e = f"{s} (interacts with) {t}"
-        if not (e in skip_edges):
+        if e not in skip_edges:
             edges.append(e)
 
     escaped_names = _cytoscape_safe_names(set(edges))
@@ -180,16 +178,14 @@ def subnetwork_edge_induced_from_paths(paths, g, parent_suid, name="subnetwork (
 
     _, cytoscape_edges = get_path_edges(paths, g)
 
-    network_suid = p4c.networks.create_subnetwork(
+    return p4c.networks.create_subnetwork(
         nodes=all_path_nodes,
         edges=cytoscape_edges,
         subnetwork_name=name,
         network=parent_suid,
         exclude_edges=True,
-        edges_by_col="shared name"
+        edges_by_col="shared name",
     )
-
-    return network_suid
 
 def subnetwork_node_induced(nodes, parent_suid, name="subnetwork (node induced)"):
     '''Subnetwork from existing Cystoscape network.
@@ -203,13 +199,9 @@ def subnetwork_node_induced(nodes, parent_suid, name="subnetwork (node induced)"
         network=parent_suid
     )
 
-    network_suid = p4c.networks.create_subnetwork(
-        nodes=select_result['nodes'],
-        subnetwork_name=name,
-        network=parent_suid
+    return p4c.networks.create_subnetwork(
+        nodes=select_result['nodes'], subnetwork_name=name, network=parent_suid
     )
-
-    return network_suid
 
 def subnetwork_neighbours(nodes, parent_suid, name="subnetwork (1st neighbours)"):
     ''' Node-induced neighbourhood of `nodes`.
@@ -225,13 +217,9 @@ def subnetwork_neighbours(nodes, parent_suid, name="subnetwork (1st neighbours)"
 
     neighbours = p4c.select_first_neighbors(network=parent_suid)
 
-    network_suid = p4c.networks.create_subnetwork(
-        nodes=neighbours['nodes'],
-        subnetwork_name=name,
-        network=parent_suid
+    return p4c.networks.create_subnetwork(
+        nodes=neighbours['nodes'], subnetwork_name=name, network=parent_suid
     )
-
-    return network_suid
 
 def contrast_colour(colour):
     '''To contrast label to node colours'''
@@ -275,13 +263,13 @@ def apply_shortest_paths_style(sources, path_lists, target, g, edge_colors=None,
         for node in nodes:
             d = len(nx.shortest_path(g, source=node, target=target)) -1
             path_searches_attributes[node]['distance-to-target'] = d
-            if not (node in skip_source):
+            if node not in skip_source:
                 path_searches_attributes[node]['node-path-source'] = source
                 skip_source.update([node])
 
         _, cytoscape_edges = get_path_edges(paths, g)
         for e in cytoscape_edges:
-            if not e in edge_priority:
+            if e not in edge_priority:
                 edge_priority[e] = {'edge-priority': f"direct path ({source})"}
 
     p4c.tables.load_table_data(
@@ -301,8 +289,10 @@ def apply_shortest_paths_style(sources, path_lists, target, g, edge_colors=None,
     )
 
     if node_colors:
-        max_len = max([path_searches_attributes[x]['distance-to-target'] \
-                       for x in path_searches_attributes])
+        max_len = max(
+            path_searches_attributes[x]['distance-to-target']
+            for x in path_searches_attributes
+        )
         node_color_mapping_range = range(0, max_len+1, int(max_len / (len(node_colors)-1)))
 
         p4c.style_mappings.set_node_color_mapping(
@@ -376,8 +366,7 @@ def add_custom_png(network, create_png, style=None):
 
     node_pngs = {}
     for node in nodes:
-        node_png_fname = create_png(node)
-        if node_png_fname:
+        if node_png_fname := create_png(node):
             node_pngs[node] = {'fig_location':f"file:{str(node_png_fname.absolute())}"}
 
     table = pd.DataFrame.from_dict(node_pngs, orient='index')

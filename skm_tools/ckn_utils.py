@@ -26,11 +26,7 @@ def filter_ckn_edges(g, keep_edge_ranks, remove_isolates=True):
     if isinstance(keep_edge_ranks, int):
         keep_edge_ranks = [keep_edge_ranks]
 
-    to_remove_ranks = []
-    for r in ckn_ranks:
-        if not (r in keep_edge_ranks):
-            to_remove_ranks.append(r)
-
+    to_remove_ranks = [r for r in ckn_ranks if r not in keep_edge_ranks]
     to_remove = []
     for r in to_remove_ranks:
         to_remove += [(u,v) for u, v, d in g.edges(data=True,) if d["rank"]==r]
@@ -62,23 +58,38 @@ def filter_ckn_nodes(
 
     if species:
         no_species = [
-            n for n, data in g.nodes(data=True) if not (
-                data['species'] in species
-            )
+            n
+            for n, data in g.nodes(data=True)
+            if data['species'] not in species
         ]
         to_remove.update(no_species)
-        reasons = {**reasons, **{n:"wrong species" for n in no_species if not n in reasons}}
+        reasons = reasons | {
+            n: "wrong species" for n in no_species if n not in reasons
+        }
 
     if node_types:
         # nodes not in keep_types
-        wrong_type = [n for n, data in g.nodes(data=True) if not (data['node_type'] in node_types)]
+        wrong_type = [
+            n
+            for n, data in g.nodes(data=True)
+            if data['node_type'] not in node_types
+        ]
         to_remove.update(wrong_type)
-        reasons = {**reasons, **{n:"wrong node type" for n in wrong_type if not n in reasons}}
+        reasons = reasons | {
+            n: "wrong node type" for n in wrong_type if n not in reasons
+        }
 
     if tissues:
-        wrong_tissue = [n for n, data in g.nodes(data=True) if ( not data['tissue'] ) or ( not (len([aa for aa in data['tissue'] if aa in tissues])>0) )]
+        wrong_tissue = [
+            n
+            for n, data in g.nodes(data=True)
+            if not data['tissue']
+            or not [aa for aa in data['tissue'] if aa in tissues]
+        ]
         to_remove.update(wrong_tissue)
-        reasons = {**reasons, **{n:"wrong tissue type" for n in wrong_tissue if not n in reasons}}
+        reasons = reasons | {
+            n: "wrong tissue type" for n in wrong_tissue if n not in reasons
+        }
 
 
     # now remove complexes that contain any nodes to be removed entities
@@ -94,9 +105,14 @@ def filter_ckn_nodes(
         for n in x.split("|"):
             if n in as_components:
                 return True
+
     complex_component_missing = [n for n in g.nodes() if complex_to_remove(n)]
     to_remove.update(complex_component_missing)
-    reasons = {**reasons, **{n:"complex component removed" for n in complex_component_missing if not n in reasons}}
+    reasons = reasons | {
+        n: "complex component removed"
+        for n in complex_component_missing
+        if n not in reasons
+    }
 
     # remove the nodes
     g.remove_nodes_from(to_remove)
@@ -105,7 +121,7 @@ def filter_ckn_nodes(
     if remove_isolates:
         isolates = list(nx.isolates(g))
         g.remove_nodes_from(isolates)
-        reasons = {**reasons, **{n:"isolate" for n in isolates if not n in reasons}}
+        reasons = reasons | {n: "isolate" for n in isolates if n not in reasons}
 
     now_size = g.number_of_nodes()
     print(f"Removed {og_size - now_size} nodes from network.")
