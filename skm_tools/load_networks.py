@@ -58,9 +58,7 @@ def pss_to_networkx(edge_path=None, node_path=None):
     node_df.set_index("name", inplace=True, drop=False)
 
     def to_list(x):
-        if isinstance(x, str):
-            return x.split(',')
-        return None
+        return x.split(',') if isinstance(x, str) else None
 
     for c in [
         'ath_homologues',
