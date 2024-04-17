@@ -1,7 +1,10 @@
 '''E.g. filter ckn on edge ranks'''
 
+import re
 from collections import defaultdict
 import networkx as nx
+
+from .utils import lists_intersect, is_listlike
 
 ckn_ranks = [0, 1, 2, 3, 4]
 
@@ -111,3 +114,25 @@ def filter_ckn_nodes(
     print(f"Removed {og_size - now_size} nodes from network.")
 
     return reasons
+
+
+def get_all_annotations(g, key):
+    annots = {x for n, d in g.nodes(data=True) if d[key] is not None for x in d[key]}
+    return annots
+
+def get_nodes_by_annotation(g, gmm=None, children=True):
+
+    if is_listlike(gmm):
+
+        if children:
+            # automatically extract children annotations
+            all_gmms = get_all_annotations(g, "GMM")
+            gmm = [x.split("_")[0] for x in gmm]
+            gmm = sorted([x for x in all_gmms if any([re.match(fr"^{re.escape(a)}[\.|_]", x) for a in gmm])])
+            print(f"skm-tools: Also using children annotations. Complete list is now:", end="\n\t")
+            print('\n\t'.join(gmm))
+
+        return [n for n, d in g.nodes(data=True) if lists_intersect(d["GMM"], gmm)]
+
+
+    return []
