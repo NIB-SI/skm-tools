@@ -17,6 +17,10 @@ Instructions for using [DiNAR](https://github.com/NIB-SI/DiNAR/) (Differential N
 
 ## Case studies from the publication
 
+See: https://doi.org/10.1016/j.xplc.2024.100920.
+
+The `publication` branch contains skm-tools as it existed when performing the analysis in the publication.
+
 ### [Case study 1: Interaction of ABA, JA, and SA in the activation of RD29 transcription](https://github.com/NIB-SI/skm-tools/tree/main/publication/case-study-1)
 Experimental results showed that ABA is able to induce expression of RD29 in both arabidopsis and potato plants. However, the addition of SA or JA showed attenuation of this induction (while alone they had no effect). Here, we interrogate the PSS network of stress signalling to identify potential points of intersection between the ABA activation of RD29 and SA or JA pathways, to identify potential mechanistic explanations of the observed experimental results.
 
