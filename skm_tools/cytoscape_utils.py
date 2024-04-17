@@ -90,17 +90,14 @@ def highlight_path(node_names, colour, skip_nodes=None, skip_edges=None, label_c
     '''
 
     if isinstance(skip_nodes, Sequence) and not isinstance(skip_nodes, str):
-        node_names = [n for n in node_names if not n in skip_nodes]
+        nodes_for_highlight = [n for n in node_names if not n in skip_nodes]
 
-    if len(node_names) == 0:
+    if len(nodes_for_highlight) == 0:
         print("No more nodes to colour")
         return [], []
 
-    if not isinstance(skip_edges, Sequence) and not isinstance(skip_edges, str):
-        skip_edges = []
-
     highlight_nodes(
-        node_names,
+        nodes_for_highlight,
         colour=colour,
         label_color=label_color,
         border_color=border_color,
@@ -108,9 +105,13 @@ def highlight_path(node_names, colour, skip_nodes=None, skip_edges=None, label_c
         network=network
     )
 
+    if not isinstance(skip_edges, Sequence) and not isinstance(skip_edges, str):
+        skip_edges = []
+
     edge_pairs = []
     for s, t in zip(node_names, node_names[1:]):
         edge_pairs.append((s, t))
+        print(s, t)
     edges = highlight_edges(edge_pairs, colour, skip_edges=skip_edges, edge_line_width=edge_line_width, network=network)
 
     return node_names, edges
@@ -154,6 +155,50 @@ def get_path_edges(paths, g):
         cytoscape_edges = _cytoscape_safe_names([f"{u} (interacts with) {v}" for u, v in edges])
 
     return edges, cytoscape_edges
+
+
+def subnetwork_edge_induced(edge_pairs, g, parent_suid, name="subnetwork (edge induced)"):
+
+    '''Subnetwork from existing Cytosape network.
+
+    Notes
+    -----
+
+    First we find the Cytoscape identifiers for the nodes we are interested in
+    by "selecting" the nodes in Cytoscape. Due to a py4cytoscape bug, we need
+    to escape the commas in the node names.
+    '''
+
+    all_node_names = {y for x in edge_pairs for y in x}
+    escaped_names = _cytoscape_safe_names(set(all_node_names))
+    select_result = p4c.select_nodes(
+        escaped_names,
+        by_col="name",
+        preserve_current_selection=False,
+        network=parent_suid
+    )
+
+    all_path_nodes = select_result["nodes"]
+
+    cytoscape_edges = []
+    for s, t in edge_pairs:
+        e = f"{s} (interacts with) {t}"
+        cytoscape_edges.append(e)
+
+    network_suid = p4c.networks.create_subnetwork(
+        nodes=all_path_nodes,
+        edges=cytoscape_edges,
+        subnetwork_name=name,
+        network=parent_suid,
+        exclude_edges=True,
+        edges_by_col="shared name"
+    )
+
+    return network_suid
+
+
+
+
 
 def subnetwork_edge_induced_from_paths(paths, g, parent_suid, name="subnetwork (edge induced)"):
 
@@ -421,46 +466,78 @@ def export_network(network, filename, format="PDF"):
         type=format,
         network=network,
         overwrite_file=True,
-        resolution=600
-        # all_graphics_details=True,
+        # resolution=600
+        all_graphics_details=True,
         # hide_labels=False
     )
 
-def export_collection_to_pdf(collection_suid, filename, font_size=20, font='Helvetica'):
+
+
+def _create_text_pdf(text, mb, font, font_size):
+
+    packet = io.BytesIO()
+
+    can = canvas.Canvas(packet, pagesize=(mb.width, mb.height))
+    try:
+        can.setFont(font, font_size)
+    except KeyError as e:
+        print(f"Font {font} not available. Using {can._fontname}. ")
+        font = can._fontname
+        can.setFont(font, font_size)
+
+    text_width = canvas.pdfmetrics._fonts[font].stringWidth(text, size=font_size)
+    # rtl_fonts['Helvetica'].stringWidth(text, size=font_size)
+
+    center = (mb.right - mb.left)/2 + mb.left
+    text_left = center - text_width/2
+    bottom = mb.bottom + font_size/4
+
+
+    can.drawString(text_left, bottom, text)
+    can.save()
+
+    packet.seek(0)
+    new_pdf = PdfReader(packet)
+
+    return new_pdf
+
+def export_collection_to_pdf(collection_suid, folder, font_size=20):
+    '''Collection to a pdf per network'''
+
+    from pdfCropMargins import crop
+
+    networks = sorted(p4c.collections.get_collection_networks(collection_suid))
+
+    i = 0
+    if not folder.exists():
+        folder.mkdir()
+
+    for network in networks:
+        network_name = p4c.get_network_name(network)
+        print(network, network_name)
+        pdf = folder / f"{re.sub('[^a-zA-Z0-9]+', '_', network_name).strip('_')}_{network}.pdf"
+        export_network(network, pdf, format="pdf")
+
+        cropped_pdf1 = folder / (pdf.stem + "_cropped" + pdf.suffix)
+        cropped_pdf2 = folder / (pdf.stem + "_2nd_cropped" + pdf.suffix)
+
+        crop(['--noundosave', '-o', str(cropped_pdf1), str(pdf)])
+        crop(['--noundosave', '-a4', '0', f'-{font_size}', '0', '0', '-o', str(cropped_pdf2), str(cropped_pdf1)])
+
+        pdf.unlink()
+        cropped_pdf1.unlink()
+
+    print(f'Collection saved to {str(folder)}')
+
+def export_collection_to_single_pdf(collection_suid, filename, font_size=20, caption=True, font='Helvetica'):
+    '''Collection to single pdf document'''
     '''requires pdf libraries'''
 
     from pypdf import PdfWriter, PdfReader
     from pdfCropMargins import crop
-
     from reportlab.pdfgen import canvas
 
-    def create_text_pdf(text, mb, font, font_size):
 
-        packet = io.BytesIO()
-
-        can = canvas.Canvas(packet, pagesize=(mb.width, mb.height))
-        try:
-            can.setFont(font, font_size)
-        except KeyError as e:
-            print(f"Font {font} not available. Using {can._fontname}. ")
-            font = can._fontname
-            can.setFont(font, font_size)
-
-        text_width = canvas.pdfmetrics._fonts[font].stringWidth(text, size=font_size)
-        # rtl_fonts['Helvetica'].stringWidth(text, size=font_size)
-
-        center = (mb.right - mb.left)/2 + mb.left
-        text_left = center - text_width/2
-        bottom = mb.bottom + font_size/4
-
-
-        can.drawString(text_left, bottom, text)
-        can.save()
-
-        packet.seek(0)
-        new_pdf = PdfReader(packet)
-
-        return new_pdf
 
     networks = sorted(p4c.collections.get_collection_networks(collection_suid))
 
@@ -475,7 +552,7 @@ def export_collection_to_pdf(collection_suid, filename, font_size=20, font='Helv
     for network in networks:
         network_name = p4c.get_network_name(network)
         print(network, network_name)
-        pdf = tmp_folder / f"{re.sub('[^a-zA-Z0-9]+', '_', network_name).strip('_')}.pdf"
+        pdf = tmp_folder / f"{re.sub('[^a-zA-Z0-9]+', '_', network_name).strip('_')}_{network}.pdf"
         export_network(network, pdf, format="pdf")
 
         cropped_pdf1 = tmp_folder / (pdf.stem + "_cropped" + pdf.suffix)
@@ -487,11 +564,12 @@ def export_collection_to_pdf(collection_suid, filename, font_size=20, font='Helv
         reader = PdfReader(cropped_pdf2)
         page = reader.pages[0]
         mb = page.cropbox
-        caption_pdf = create_text_pdf(network_name, mb, font, font_size)
 
-        new_page = caption_pdf.pages[0]
-        new_page.cropbox = page.cropbox
-        page.merge_page(caption_pdf.pages[0])
+        if caption:
+            caption_pdf = _create_text_pdf(network_name, mb, font, font_size)
+            new_page = caption_pdf.pages[0]
+            new_page.cropbox = page.cropbox
+            page.merge_page(caption_pdf.pages[0])
 
         writer.add_page(page)
 
