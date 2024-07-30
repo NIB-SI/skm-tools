@@ -6,6 +6,8 @@ from pathlib import Path
 import networkx as nx
 import pandas as pd
 from .skm_download_urls import *
+from .utils import to_list
+
 
 def pss_to_networkx(edge_path=None, node_path=None):
     ''' Load PSS from the rxn bipartite projection SIF format to a
@@ -56,11 +58,6 @@ def pss_to_networkx(edge_path=None, node_path=None):
 
     node_df = pd.read_csv(node_path, sep="\t")
     node_df.set_index("name", inplace=True, drop=False)
-
-    def to_list(x):
-        if isinstance(x, str):
-            return x.split(',')
-        return None
 
     for c in [
         'ath_homologues',
@@ -131,11 +128,6 @@ def pss_model_to_networkx(edge_path=None, node_path=None):
 
     node_df = pd.read_csv(node_path, sep="\t")
     node_df.set_index("name", inplace=True, drop=False)
-
-    def to_list(x):
-        if isinstance(x, str):
-            return x.split(',')
-        return None
 
     for c in [
         'ath_homologues',
