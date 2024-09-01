@@ -17,7 +17,7 @@ def rank_counts(g):
 
     return counts
 
-def filter_ckn_edges(g, keep_edge_ranks, remove_isolates=True):
+def filter_ckn_edges(g, keep_edge_ranks=None, keep_edge_types=None, remove_isolates=True):
 
     '''
     Inplace function
@@ -29,16 +29,16 @@ def filter_ckn_edges(g, keep_edge_ranks, remove_isolates=True):
     if isinstance(keep_edge_ranks, int):
         keep_edge_ranks = [keep_edge_ranks]
 
-    to_remove_ranks = []
-    for r in ckn_ranks:
-        if not (r in keep_edge_ranks):
-            to_remove_ranks.append(r)
+    if isinstance(keep_edge_types, str):
+        keep_edge_types = [keep_edge_types]
 
-    to_remove = []
-    for r in to_remove_ranks:
-        to_remove += [(u,v) for u, v, d in g.edges(data=True,) if d["rank"]==r]
+    if isinstance(keep_edge_ranks, list):
+        to_remove = [(u,v) for u, v, d in g.edges(data=True,) if not (d["rank"] in keep_edge_ranks)]
+        g.remove_edges_from(to_remove)
 
-    g.remove_edges_from(to_remove)
+    if keep_edge_types:
+        to_remove = [(u,v) for u, v, d in g.edges(data=True,) if not (d["type"] in keep_edge_types)]
+        g.remove_edges_from(to_remove)
 
     # remove isolates resulting from filtering
     if remove_isolates:
