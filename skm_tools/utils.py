@@ -9,3 +9,8 @@ def lists_intersect(l1, l2):
 
 def is_listlike(obj):
     return isinstance(obj, Sequence) and not isinstance(obj, str)
+
+def to_list(x):
+    if isinstance(x, str):
+        return x.split(',')
+    return None

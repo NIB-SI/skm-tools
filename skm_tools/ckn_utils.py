@@ -136,3 +136,41 @@ def get_nodes_by_annotation(g, gmm=None, children=True):
 
 
     return []
+
+
+def to_graph_tool(g):
+    """
+    Converts a networkx graph to a graph-tool graph.
+    https://bbengfort.github.io/2016/06/graph-tool-from-networkx/
+    """
+
+    import graph_tool as gt
+
+    # Phase 0: Create a directed or undirected graph-tool Graph
+    gtG = gt.Graph(directed=g.is_directed())
+
+    # Also add the node id: in NetworkX a node can be any hashable type, but
+    # in graph-tool node are defined as indices. So we capture any strings
+    # in a special PropertyMap called 'id' -- modify as needed!
+    gtG.vertex_properties['id'] = gtG.new_vertex_property('string')
+
+    # Phase 2: Actually add all the nodes and vertices with their properties
+    # Add the nodes
+    vertices = {} # vertex mapping for tracking edges later
+    for node, data in g.nodes(data=True):
+
+        # Create the vertex and annotate for our edges later
+        v = gtG.add_vertex()
+        vertices[node] = v
+
+        # Set the vertex properties, not forgetting the id property
+        gtG.vp["id"][v] = str(node)
+
+    # Add the edges
+    for src, dst, data in g.edges(data=True):
+
+        # Look up the vertex structs from our vertices mapping and add edge.
+        e = gtG.add_edge(vertices[src], vertices[dst])
+
+    # Done, finally!
+    return gtG, vertices
