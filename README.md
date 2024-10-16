@@ -37,7 +37,7 @@ In this case study, we analysed the results of a proteimics study of arabidopsis
 
 Includes demonstration of: 1, 2, 3, 4, 5, 6, 7
 
-## Requirements
+## Install and requirements
 
 The only required non-default library is networkX (https://networkx.org/).
 
@@ -45,6 +45,16 @@ Additional __optional__ libraries are
 * py4cytoscape (https://py4cytoscape.readthedocs.io/) – necessary if you wish to view the results interactively in Cytoscape.
 * graphviz and pygraphviz – necessary for using graphviz layouts instead of networkX or Cytoscape layouts.
 * pypdf, pdfCropMargins, reportlab – necessary if you wish to batch export multiple network views from Cytoscape to a single file.
+
+### Install
+
+To install from GitHub:
+
+    pip install "skm-tools @ git+ssh://git@github.com/NIB-SI/skm-tools.git"
+
+To install with Cytoscape and PDF features enabled:
+
+    pip install "skm-tools[cytoscape,pdf] @ git+ssh://git@github.com/NIB-SI/skm-tools.git"
 
 ## Citation
 __TODO__
