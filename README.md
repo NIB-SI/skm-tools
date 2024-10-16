@@ -57,7 +57,10 @@ To install with Cytoscape and PDF features enabled:
     pip install "skm-tools[cytoscape,pdf] @ git+ssh://git@github.com/NIB-SI/skm-tools.git"
 
 ## Citation
-__TODO__
+
+If you used skm-tools (or SKM) in your work, please cite: 
+
+> Carissa Bleker, Živa Ramšak, Andras Bittner, Vid Podpečan, Maja Zagorščak, Bernhard Wurzinger, Špela Baebler, Marko Petek, Maja Križnik, Annelotte van Dieren, Juliane Gruber, Leila Afjehi-Sadat, Wolfram Weckwert, Anže Županič, Markus Teige, Ute C. Vothknecht, Kristina Gruden. (2024). Stress Knowledge Map: A knowledge graph resource for systems biology analysis of plant stress responses. Plant Communications. doi:10.1016/j.xplc.2024.100920 .
 
 ## Notes and additional resources
 
