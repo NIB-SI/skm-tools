@@ -66,6 +66,7 @@ def export_collection_to_single_pdf(collection_suid, filename, font_size=20, cap
 
     networks = sorted(p4c.collections.get_collection_networks(collection_suid))
 
+    # TODO rewrite to use "with tempfile.TemporaryDirectory() as tmpdir:"
     i = 0
     while (filename.parent / f"tmp{i}").exists():
         i += 1

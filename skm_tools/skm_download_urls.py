@@ -15,7 +15,7 @@ PSS_RXN_NODE_URL = 'https://skm.nib.si/downloads/pss/public/rxn-nodes'
 
 # PSS DiNAR Projection
 PSS_DINAR_EDGE_URL = 'https://skm.nib.si/downloads/pss/public/dinar-edges'
-PSS_DINAR_NODE_URL_1 = 'https://skm.nib.si/downloads/pss/public/dinar-nodes'
+PSS_DINAR_NODE_URL_1 = PSS_RXN_NODE_URL
 PSS_DINAR_NODE_URL_2 = CKN_NODE_URL
 
 

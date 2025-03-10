@@ -408,20 +408,22 @@ def layout_from_coords(network, table):
 
     p4c.set_visual_style(current_style, network=network)
 
-def add_custom_png(network, create_png, style=None):
+def add_custom_png(network, create_png, style=None, **kwargs):
     '''
     network : int
         Cytoscape suid, where to apply the layout
     create_png: function
         function that creates a png per node and returns png file path
-
+        First argument must be the node name.
+    kwargs
+        Optional key word arguments to `create_png`
     '''
 
     nodes = p4c.get_all_nodes(network=network)
 
     node_pngs = {}
     for node in nodes:
-        node_png_fname = create_png(node)
+        node_png_fname = create_png(node, **kwargs)
         if node_png_fname:
             node_pngs[node] = {'fig_location':f"file:{str(node_png_fname.absolute())}"}
 
