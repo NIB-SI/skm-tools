@@ -408,7 +408,7 @@ def ckn_to_networkx(
         for u, v, data in g.edges(data=True):
             if (data["isDirected"] == 0) and ( not g.has_edge(v, u) ):
                 edges_to_add.append((v, u, data))
-    _ = g.add_edges_from(edges_to_add)
+        _ = g.add_edges_from(edges_to_add)
 
     if directed:
         to_remove = [(u,v) for u, v, d in g.edges(data=True,) if d["isDirected"]==0]
