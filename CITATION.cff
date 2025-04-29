@@ -1,0 +1,55 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+authors:
+- family-names: "Carissa"
+  given-names: "Bleker"
+  orcid: "https://orcid.org/0000-0003-1617-7145"
+title: "skm-tools"
+version: 0.1
+date-released: 2024-10-16
+url: "https://github.com/NIB-SI/skm-tools/"
+preferred-citation:
+  type: article
+  authors:
+  - family-names: "Bleker"
+    given-names: "Carissa"
+    orcid: "https://orcid.org/0000-0003-1617-7145"
+  - family-names: "Ramšak"
+    given-names: "Živa"
+  - family-names: "Bittner"
+    given-names: "Andras"
+  - family-names: "Podpečan"
+    given-names: "Vid"
+  - family-names: "Zagorščak"
+    given-names: "Maja"
+  - family-names: "Wurzinger"
+    given-names: "Bernhard"
+  - family-names: "Baebler"
+    given-names: "Špela"
+  - family-names: "Petek"
+    given-names: "Marko"
+  - family-names: "Križnik"
+    given-names: "Maja"
+  - family-names: "van Dieren"
+    given-names: "Annelotte"
+  - family-names: "Gruber"
+    given-names: "Juliane"
+  - family-names: "Afjehi-Sadat"
+    given-names: "Leila"
+  - family-names: "Weckwerth"
+    given-names: "Wolfram"
+  - family-names: "Županič"
+    given-names: "Anže"
+  - family-names: "Teige"
+    given-names: "Markus"
+  - family-names: "Vothknecht"
+    given-names: "Ute C."
+  - family-names: "Gruden"
+    given-names: "Kristina"
+  doi: "10.1016/j.xplc.2024.100920"
+  journal: "Plant Communications"
+  month: 4
+  title: "Stress Knowledge Map: A knowledge graph resource for systems biology analysis of plant stress responses"
+  issue: 5
+  volume: 6
+  year: 2024
