@@ -337,6 +337,7 @@ def ckn_to_networkx(
         becomes
             A-->B (undirected)
             B-->A (undirected)
+        (in contrast to directed, and not meant to be used together)
 
     directed : bool
         Whether to remove undirected edges from CKN

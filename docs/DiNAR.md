@@ -16,8 +16,6 @@ To use CKN or PSS as the prior knowledge networks in DiNAR, you can follow the s
 
 </br>
 
-(*) Take care of empty strings in tables in general, replace them with `-`
-
-(**) Try to keep shortName short
-
-
+## Notes:
+* Take care of empty strings in tables in general, replace them with `-`
+* Try to keep shortName short

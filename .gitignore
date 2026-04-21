@@ -1,7 +1,7 @@
 # 
 
 archive/
-
+./notes.md
 
 
 # Byte-compiled / optimized / DLL files
@@ -56,6 +56,10 @@ coverage.xml
 *.py,cover
 .hypothesis/
 .pytest_cache/
+
+
+# py4cytoscape stuff
+py4cytoscape.log*
 
 # Translations
 *.mo
