@@ -9,7 +9,7 @@ from .skm_download_urls import *
 from .utils import to_list
 
 
-def pss_to_networkx(edge_path=None, node_path=None):
+def pss_to_networkx(edge_path, node_path):
     ''' Load PSS from the rxn bipartite projection SIF format to a
     networkx directed multigraph format, including node attributes
 
@@ -147,7 +147,7 @@ def pss_model_to_networkx(edge_path=None, node_path=None):
 
     return g
 
-def pss_dinar_to_networkx(edge_path=None, node_path=None):
+def pss_dinar_to_networkx(edge_path=None, node_path=None, clean=True):
     ''' Load PSS from the DiNAR SIF format to a
     networkx directed multigraph format, including node attributes
 
@@ -202,14 +202,16 @@ def pss_dinar_to_networkx(edge_path=None, node_path=None):
         '''
 
         node_path_1 = Path(f"{node_path}.other.tmp")
-        print(f"\tAttempting to download the node annotations (PSS) to {node_path_1}.", end=" ")
-        urlretrieve(PSS_DINAR_NODE_URL_1, node_path_1)
-        print("Success.")
+        if not node_path_1.exists():
+            print(f"\tAttempting to download the node annotations (PSS) to {node_path_1}.", end=" ")
+            urlretrieve(PSS_DINAR_NODE_URL_1, node_path_1)
+            print("Success.")
 
         node_path_2 = Path(f"{node_path}.genes.tmp")
-        print(f"\tAttempting to download the node annotations (CKN) to {node_path_2}", end=" ")
-        urlretrieve(PSS_DINAR_NODE_URL_2, node_path_2)
-        print("Success.")
+        if not node_path_1.exists():
+            print(f"\tAttempting to download the node annotations (CKN) to {node_path_2}", end=" ")
+            urlretrieve(PSS_DINAR_NODE_URL_2, node_path_2)
+            print("Success.")
 
         print(f"Creating node annotation file...", end=" ")
 
@@ -227,9 +229,8 @@ def pss_dinar_to_networkx(edge_path=None, node_path=None):
 
         # Extract the pathway and functional_cluster_id from PSS, per gene instead of per FunctionalCluster
         per_gene = node_df_1[["ath_homologues", "pathway", "functional_cluster_id"]]
-        per_gene.loc[:,"ath_homologues"] = per_gene["ath_homologues"].str.split(",")
+        per_gene.loc["ath_homologues"] = per_gene["ath_homologues"].str.split(",")
         per_gene = per_gene.explode("ath_homologues")
-        per_gene = per_gene.set_index("ath_homologues")
         per_gene.groupby("ath_homologues").agg({
             "pathway":"first",
             "functional_cluster_id": lambda x: ",".join(x)
@@ -238,14 +239,14 @@ def pss_dinar_to_networkx(edge_path=None, node_path=None):
 
         # We can still use the PSS annotations for FunctionalClusters with only one gene
         # (They're probably okay...)
-        node_df_1 = node_df_1[node_df_1["ath_homologues"].apply(lambda x: len(x.split(","))==1)]
-        node_df_1.index = node_df_1["ath_homologues"]
-        node_df_1.index.name = "name"
+        # node_df_1 = node_df_1[node_df_1["ath_homologues"].apply(lambda x: len(x.split(","))==1)]
+        # node_df_1.index = node_df_1["ath_homologues"]
+        # node_df_1.index.name = "name"
 
         node_df = pd.concat([node_df, node_df_1])
 
         # Drop annotations we don't care about...
-        node_df.drop(['name', 'family', 'ath_homologues'], axis=1, inplace=True)
+        node_df.drop(['name', 'family'], axis=1, inplace=True)
 
         # Now we get the unannotated genes, and get the annotations from CKN
         missing_genes = set(g.nodes()) - set(node_df.index)
@@ -273,19 +274,23 @@ def pss_dinar_to_networkx(edge_path=None, node_path=None):
         node_df_2.index.name = "name"
         node_df_2["node_type"] = node_df_2["node_type"].apply(lambda x: node_type_dict[x])
         node_df_2 = node_df_2.rename(columns = {'full_name':'description'})
-        node_df_2["pathway"] = node_df_2.index.map(lambda x: per_gene["pathway"][x])
-        node_df_2["functional_cluster_id"] = node_df_2.index.map(lambda x: per_gene["functional_cluster_id"][x])
+        node_df_2["pathway"] = node_df_2.index.map(lambda x: per_gene["pathway"].get(x, pd.NA))
+        node_df_2["functional_cluster_id"] = node_df_2.index.map(lambda x: per_gene["functional_cluster_id"].get(x, pd.NA))
 
         node_df_2 = node_df_2[['short_name', 'description', 'pathway', 'node_type', 'functional_cluster_id']]
 
         node_df = pd.concat([node_df, node_df_2])
         node_df['name'] = node_df.index
 
+        mask = node_df["functional_cluster_id"].notna()
+        node_df.loc[mask, "ath_homologues"] = node_df["name"]
+
         node_df.to_csv(node_path, sep="\t")
 
-        # delete the downloaded files
-        node_path_1.unlink()
-        node_path_2.unlink()
+        if clean:
+            # delete the downloaded files
+            node_path_1.unlink()
+            node_path_2.unlink()
 
         print("Success.")
 
@@ -324,7 +329,7 @@ def ckn_to_networkx(
         Path to the node annotation file,
         if file does not exist, download from skm.nib.si
 
-    expanded : bool
+    expanded : bool #TODO
         Whether to use the expanded CKN. If False, use CKN
         collapsed to a single edge between any pair of nodes.
         Ignored if edge_path already exists

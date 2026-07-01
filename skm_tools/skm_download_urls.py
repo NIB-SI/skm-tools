@@ -17,3 +17,7 @@ PSS_RXN_NODE_URL = 'https://skm.nib.si/downloads/pss/public/rxn-nodes'
 PSS_DINAR_EDGE_URL = 'https://skm.nib.si/downloads/pss/public/dinar-edges'
 PSS_DINAR_NODE_URL_1 = PSS_RXN_NODE_URL
 PSS_DINAR_NODE_URL_2 = CKN_NODE_URL
+
+# Translation files
+# e.g. https://skm.nib.si/downloads/translations/parm
+GENE_TRANSLATION_URL = 'https://skm.nib.si/downloads/translations/{}'

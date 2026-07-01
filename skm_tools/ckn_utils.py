@@ -3,6 +3,7 @@
 import re
 from collections import defaultdict
 import networkx as nx
+import pandas as pd
 
 from .utils import lists_intersect, is_listlike, remove_isolate_nodes
 
@@ -12,7 +13,8 @@ ckn_ranks = [0, 1, 2, 3, 4]
 def rank_counts(g):
     counts = defaultdict(int)
     for _, _, data in g.edges(data=True):
-        counts[data['rank']] += 1
+        if 'rank' in data:
+            counts[data['rank']] += 1
     for i in range(len(ckn_ranks)):
         print(f"rank {i}:\t {counts[i]:,}")
 
@@ -43,7 +45,7 @@ def filter_ckn_edges(g,
 
     if isinstance(keep_edge_ranks, list):
         to_remove = [(u, v) for u, v, d in g.edges(data=True, )
-                     if not (d["rank"] in keep_edge_ranks)]
+                     if 'rank' in d and not (d["rank"] in keep_edge_ranks)]
         g.remove_edges_from(to_remove)
 
     if isinstance(keep_edge_types, list):
@@ -80,7 +82,10 @@ def filter_ckn_nodes(g,
     if species:
         no_species = [
             n for n, data in g.nodes(data=True)
+            # missing requested species
             if not (data['species'] in species)
+            # but not a "nan" species (e.g. metabolites)
+            and pd.notna(data['species'])
         ]
         to_remove.update(no_species)
         reasons = {
