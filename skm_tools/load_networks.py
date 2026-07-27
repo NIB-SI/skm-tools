@@ -226,8 +226,8 @@ def pss_dinar_to_networkx(edge_path=None, node_path=None):
         node_df_1 = node_df_1[~node_df_1["ath_homologues"].isna()]
 
         # Extract the pathway and functional_cluster_id from PSS, per gene instead of per FunctionalCluster
-        per_gene = node_df_1[["ath_homologues", "pathway", "functional_cluster_id"]]
-        per_gene.loc[:,"ath_homologues"] = per_gene["ath_homologues"].str.split(",")
+        per_gene = node_df_1[["ath_homologues", "pathway", "functional_cluster_id"]].copy()
+        per_gene["ath_homologues"] = per_gene["ath_homologues"].astype("object").str.split(",")
         per_gene = per_gene.explode("ath_homologues")
         per_gene = per_gene.set_index("ath_homologues")
         per_gene.groupby("ath_homologues").agg({
