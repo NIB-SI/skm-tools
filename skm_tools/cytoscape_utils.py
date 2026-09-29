@@ -91,19 +91,19 @@ def highlight_path(node_names, colour, skip_nodes=None, skip_edges=None, label_c
 
     if isinstance(skip_nodes, Sequence) and not isinstance(skip_nodes, str):
         nodes_for_highlight = [n for n in node_names if not n in skip_nodes]
+    else:
+        nodes_for_highlight = list(node_names)
 
-    if len(nodes_for_highlight) == 0:
-        print("No more nodes to colour")
-        return [], []
-
-    highlight_nodes(
-        nodes_for_highlight,
-        colour=colour,
-        label_color=label_color,
-        border_color=border_color,
-        border_width=border_width,
-        network=network
-    )
+    # the edges are highlighted even if all nodes already are (e.g. a path between two coloured nodes)
+    if nodes_for_highlight:
+        highlight_nodes(
+            nodes_for_highlight,
+            colour=colour,
+            label_color=label_color,
+            border_color=border_color,
+            border_width=border_width,
+            network=network
+        )
 
     if not isinstance(skip_edges, Sequence) and not isinstance(skip_edges, str):
         skip_edges = []
