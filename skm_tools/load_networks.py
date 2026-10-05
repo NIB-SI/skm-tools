@@ -1,312 +1,156 @@
 '''Load from file or server to nx object'''
 
 from urllib.request import urlretrieve
+import csv
 import gzip
 from pathlib import Path
 import networkx as nx
 import pandas as pd
 from .skm_download_urls import *
-from .utils import to_list
 
 
-def pss_to_networkx(edge_path, node_path):
-    ''' Load PSS from the rxn bipartite projection SIF format to a
-    networkx directed multigraph format, including node attributes
+# PSS exports (pss-export): tab-separated, header, no quoting, empty = no value,
+# lists joined with ";" (never split on ",": names such as AHK2,3,4 contain commas).
+_PSS_LIST_SEPARATOR = ";"
+_PSS_LIST_COLUMNS = {
+    "synonyms",
+    "all_pathways",
+    "external_links",
+    "components",
+    "genes",
+}
+# Gene network only: a gene in several functional clusters has one entry per cluster
+# (in the same order) in each of these. Loaded as lists for every node, so the type
+# doesn't depend on the row. (display_label stays a string: it's what to show.)
+_PSS_GENE_CLUSTER_COLUMNS = {
+    "entity",
+    "short_name",
+    "pathway",
+    "functional_cluster_id",
+}
+_PSS_BOOL_COLUMNS = {
+    "directed",
+    "location_putative",
+    "source_location_putative",
+    "target_location_putative",
+}
+
+
+def _split_pss_list(x):
+    if x is None:
+        return None
+    # keep empty entries (as None) so per-cluster lists stay aligned
+    return [v if v else None for v in x.split(_PSS_LIST_SEPARATOR)]
+
+
+def _read_pss_table(path, list_columns=()):
+    '''Read a PSS export table to a DataFrame of str/list/bool values, with None for empty.'''
+    path = Path(path)
+    if not path.exists():
+        # TODO: download once the new exports are published on skm.nib.si
+        raise FileNotFoundError(f"{path} not found. Download URLs for the PSS network exports "
+                                "are not available yet; pass the path to a local export file.")
+
+    df = pd.read_csv(path, sep="\t", dtype=str, keep_default_na=False, na_values=[""],
+                     quoting=csv.QUOTE_NONE)
+    df = df.astype(object).where(df.notna(), None)
+
+    list_columns = _PSS_LIST_COLUMNS | set(list_columns)
+    for c in df.columns:
+        if c in list_columns or c.endswith("_homologues"):
+            df[c] = df[c].map(_split_pss_list)
+        elif c in _PSS_BOOL_COLUMNS:
+            df[c] = df[c].map(lambda x: {"True": True, "False": False}[x] if x is not None else None)
+
+    return df
+
+
+def _pss_export_to_networkx(edge_path, node_path, edge_key, node_list_columns=()):
+    '''Build a MultiDiGraph from a PSS export: nodes (with attributes) from the node file,
+    edges from the edge file, keyed by the `edge_key` column.'''
+    edge_df = _read_pss_table(edge_path)
+    node_df = _read_pss_table(node_path, node_list_columns)
+
+    g = nx.MultiDiGraph()
+    g.add_nodes_from(
+        (data.pop("id"), data) for data in node_df.to_dict("records")
+    )
+    g.add_edges_from(
+        (data.pop("source"), data.pop("target"), data[edge_key], data)
+        for data in edge_df.to_dict("records")
+    )
+    return g
+
+
+def pss_reaction_graph_to_networkx(edge_path, node_path):
+    ''' Load the PSS reaction graph export to a networkx directed multigraph,
+    including node attributes.
+
+    Entities and reactions are both nodes (reactions have `node_type` == "reaction"), with one edge
+    per reaction participant: participant -> reaction for inputs and modifiers,
+    reaction -> participant for products. This is the lossless form of PSS.
+    Edges are keyed by the participant's `role`, since an entity can take part in the same
+    reaction twice (e.g. as template and stimulator).
 
     Parameters
     ----------
 
     edge_path : str or pathlib.Path
-        Path to the edge list file,
-        if file does not exist, download from skm.nib.si
+        Path to the edge file (pss-reaction-graph-edges-*.tsv)
 
     node_path : str or pathlib.Path
-        Path to the node annotation file,
-        if file does not exist, download from skm.nib.si
-
+        Path to the node file (pss-reaction-graph-nodes-*.tsv)
     '''
-    edge_path = Path(edge_path)
-    node_path = Path(node_path)
-
-    if not edge_path.exists():
-        print(f"Attempting to download the edge list to {edge_path}.", end=" ")
-        urlretrieve(PSS_RXN_EDGE_URL, edge_path)
-        print("Success.")
-
-    if not node_path.exists():
-        print(f"Attempting to download the node annotations to {node_path}.", end=" ")
-        urlretrieve(PSS_RXN_NODE_URL, node_path)
-        print("Success.")
-
-    with open(edge_path, "rb") as handle:
-        handle.readline()
-        g = nx.read_edgelist(handle,
-                    delimiter="\t", create_using=nx.MultiDiGraph,
-                        data=list({
-                            'interaction_type':str,
-                            'directed': str,
-                            'reaction_type': str,
-                            'reaction_effect': str,
-                            'reaction_id': str,
-                            'source_edge_type': str,
-                            'source_location': str,
-                            'source_form': str,
-                            'target_edge_type': str,
-                            'target_location': str,
-                            'target_form': str,
-                        }.items()))
-
-    node_df = pd.read_csv(node_path, sep="\t")
-    node_df.set_index("name", inplace=True, drop=False)
-
-    for c in [
-        'ath_homologues',
-        'osa_homologues',
-        'stu_homologues',
-        'sly_homologues'
-        ]:
-        node_df[c] = node_df[c].apply(to_list)
-
-    nx.set_node_attributes(g, node_df.to_dict('index'))
-
-    for _, data in g.nodes(data=True):
-        if data["node_type"] in ("PlantCoding", "PlantAbstract", "PlantNonCoding"):
-            data["display_label"] = data["short_name"]
-        else:
-            data["display_label"] = data["name"]
-
-    return g
+    return _pss_export_to_networkx(edge_path, node_path, edge_key="role")
 
 
+def pss_interaction_network_to_networkx(edge_path, node_path):
+    ''' Load the PSS interaction network export to a networkx directed multigraph,
+    including node attributes.
 
-def pss_model_to_networkx(edge_path=None, node_path=None):
-    ''' Load PSS from the main SIF format to a
-    networkx directed multigraph format, including node attributes
+    Entities are nodes, and edges are entity -> entity influences through reactions
+    (`interaction`: positive-influence, negative-influence or unknown-influence).
+    Edges are keyed by `reaction_id`, as several reactions can link the same node pair.
+    Mutual influences (`directed` == False, e.g. binding partners) are already listed in
+    both directions.
 
     Parameters
     ----------
 
     edge_path : str or pathlib.Path
-        Path to the edge list file,
-        if file does not exist, download from skm.nib.si
+        Path to the edge file (pss-interaction-network-edges-*.tsv)
 
     node_path : str or pathlib.Path
-        Path to the node annotation file,
-        if file does not exist, download from skm.nib.si
-
+        Path to the node file (pss-interaction-network-nodes-*.tsv)
     '''
-    edge_path = Path(edge_path)
-    node_path = Path(node_path)
+    return _pss_export_to_networkx(edge_path, node_path, edge_key="reaction_id")
 
-    if not edge_path.exists():
-        print(f"Attempting to download the edge list to {edge_path}.", end=" ")
-        urlretrieve(PSS_EDGE_URL, edge_path)
-        print("Success.")
 
-    if not node_path.exists():
-        print(f"Attempting to download the node annotations to {node_path}.", end=" ")
-        urlretrieve(PSS_NODE_URL, node_path)
-        print("Success.")
+def pss_gene_network_to_networkx(edge_path, node_path):
+    ''' Load a PSS gene network export (one species) to a networkx directed multigraph,
+    including node attributes.
 
-    with open(edge_path, "rb") as handle:
-        handle.readline()
-        g = nx.read_edgelist(handle,
-                    delimiter="\t", create_using=nx.MultiDiGraph,
-                        data=list({
-                            'interaction_type':str,
-                            'directed': str,
-                            'reaction_type': str,
-                            'reaction_effect': str,
-                            'reaction_id': str,
-                            'source_edge_type': str,
-                            'source_location': str,
-                            'source_form': str,
-                            'target_edge_type': str,
-                            'target_location': str,
-                            'target_form': str,
-                        }.items()))
+    As the interaction network, but with functional clusters expanded into their genes
+    of one species (nodes with `node_type` == "gene").
+    Edges are keyed by `reaction_id`.
 
-    node_df = pd.read_csv(node_path, sep="\t")
-    node_df.set_index("name", inplace=True, drop=False)
-
-    for c in [
-        'ath_homologues',
-        'osa_homologues',
-        'stu_homologues',
-        'sly_homologues'
-        ]:
-        node_df[c] = node_df[c].apply(to_list)
-
-    nx.set_node_attributes(g, node_df.to_dict('index'))
-
-    for _, data in g.nodes(data=True):
-        if data["node_type"] in ("PlantCoding", "PlantAbstract", "PlantNonCoding"):
-            data["display_label"] = data["short_name"]
-        else:
-            data["display_label"] = data["name"]
-
-    return g
-
-def pss_dinar_to_networkx(edge_path=None, node_path=None, clean=True):
-    ''' Load PSS from the DiNAR SIF format to a
-    networkx directed multigraph format, including node attributes
+    A gene can be in several functional clusters, so `entity`, `short_name`, `pathway` and
+    `functional_cluster_id` are lists for every node (one entry per cluster, in the same order;
+    a single entry for nodes that aren't genes). `components` of complexes are entity ids,
+    i.e. match them against `entity`, not against the gene node ids.
 
     Parameters
     ----------
 
     edge_path : str or pathlib.Path
-        Path to the edge list file,
-        if file does not exist, download from skm.nib.si
+        Path to the edge file (pss-gene-network-<species>-edges-*.tsv)
 
     node_path : str or pathlib.Path
-        Path to the node annotation file,
-        if file does not exist, download from skm.nib.si
-
+        Path to the node file (pss-gene-network-<species>-nodes-*.tsv)
     '''
-    edge_path = Path(edge_path)
-    node_path = Path(node_path)
+    return _pss_export_to_networkx(edge_path, node_path, edge_key="reaction_id",
+                                  node_list_columns=_PSS_GENE_CLUSTER_COLUMNS)
 
-    if not edge_path.exists():
-        print(f"Attempting to download the edge list to {edge_path}.", end=" ")
-        urlretrieve(PSS_DINAR_EDGE_URL, edge_path)
-        print("Success.")
-
-    with open(edge_path, "rb") as handle:
-        handle.readline()
-        g = nx.read_edgelist(handle,
-                    delimiter="\t", create_using=nx.MultiDiGraph,
-                        data=list({
-                            'effect':str,
-                            'directed': str,
-                            'reaction_type': str,
-                            # 'reaction_effect': str,
-                            'reaction_id': str,
-                            'source_edge_type': str,
-                            # 'source_location': str,
-                            # 'source_form': str,
-                            'target_edge_type': str,
-                            # 'target_location': str,
-                            # 'target_form': str,
-                        }.items()))
-
-    if not node_path.exists():
-
-        print("Downloading files to create node annotation file.")
-
-        '''
-        Because the DiNAR projection is on the PSS node level AND
-        gene level (i.e. not FunctionalCluster) we need to create on file for
-        node annotations from the PSS node annotations file (for Metabolites,
-        Complexes, FunctionalCluster with only on gene, etc) and from the CKN
-        annotation file (for other genes in FunctionalClusters).
-        '''
-
-        node_path_1 = Path(f"{node_path}.other.tmp")
-        if not node_path_1.exists():
-            print(f"\tAttempting to download the node annotations (PSS) to {node_path_1}.", end=" ")
-            urlretrieve(PSS_DINAR_NODE_URL_1, node_path_1)
-            print("Success.")
-
-        node_path_2 = Path(f"{node_path}.genes.tmp")
-        if not node_path_1.exists():
-            print(f"\tAttempting to download the node annotations (CKN) to {node_path_2}", end=" ")
-            urlretrieve(PSS_DINAR_NODE_URL_2, node_path_2)
-            print("Success.")
-
-        print(f"Creating node annotation file...", end=" ")
-
-        node_df_1 = pd.read_csv(node_path_1, sep="\t")
-        node_df_1.set_index("name", inplace=True, drop=False)
-
-        node_df_2 = node_df = pd.read_csv(node_path_2, na_values=[''], keep_default_na=False, sep="\t", compression="gzip")
-        node_df_2.set_index("node_ID", inplace=True, drop=False)
-
-        # Everything that is not a FunctionalCluster, uses the standard PSS annotation file
-        node_df = node_df_1.loc[list(set(g.nodes()).intersection(node_df_1.index))].copy()
-
-        # Now take FuntionalClusters with ath genes
-        node_df_1 = node_df_1[~node_df_1["ath_homologues"].isna()]
-
-        # Extract the pathway and functional_cluster_id from PSS, per gene instead of per FunctionalCluster
-        per_gene = node_df_1[["ath_homologues", "pathway", "functional_cluster_id"]]
-        per_gene.loc["ath_homologues"] = per_gene["ath_homologues"].str.split(",")
-        per_gene = per_gene.explode("ath_homologues")
-        per_gene.groupby("ath_homologues").agg({
-            "pathway":"first",
-            "functional_cluster_id": lambda x: ",".join(x)
-        })
-        per_gene = per_gene.to_dict()
-
-        # We can still use the PSS annotations for FunctionalClusters with only one gene
-        # (They're probably okay...)
-        # node_df_1 = node_df_1[node_df_1["ath_homologues"].apply(lambda x: len(x.split(","))==1)]
-        # node_df_1.index = node_df_1["ath_homologues"]
-        # node_df_1.index.name = "name"
-
-        node_df = pd.concat([node_df, node_df_1])
-
-        # Drop annotations we don't care about...
-        node_df.drop(['name', 'family'], axis=1, inplace=True)
-
-        # Now we get the unannotated genes, and get the annotations from CKN
-        missing_genes = set(g.nodes()) - set(node_df.index)
-        node_df_2 = node_df_2.loc[list(missing_genes.intersection(node_df_2.index))].copy()
-
-        # CKN node type to PSS node_type
-        node_type_dict = {
-            'metabolite':'Metabolite',
-            'complex':'Complex',
-            'protein_coding':'PlantCoding',
-            'mirna':'PlantNonCoding',
-            'antisense_long_noncoding_rna':'PlantNonCoding',
-            'transposable_element_gene':'PlantCoding',
-            'pre_trna':'PlantNonCoding',
-            'other_rna':'PlantNonCoding',
-            'pseudogene':'PlantNonCoding',
-            'small_nuclear_rna':'PlantNonCoding',
-            'small_nucleolar_rna':'PlantNonCoding',
-            'abiotic':'Abiotic',
-            'process':'Process',
-            'biotic':'Biotic'
-        }
-
-        # Clean it up to match the PSS style annotations
-        node_df_2.index.name = "name"
-        node_df_2["node_type"] = node_df_2["node_type"].apply(lambda x: node_type_dict[x])
-        node_df_2 = node_df_2.rename(columns = {'full_name':'description'})
-        node_df_2["pathway"] = node_df_2.index.map(lambda x: per_gene["pathway"].get(x, pd.NA))
-        node_df_2["functional_cluster_id"] = node_df_2.index.map(lambda x: per_gene["functional_cluster_id"].get(x, pd.NA))
-
-        node_df_2 = node_df_2[['short_name', 'description', 'pathway', 'node_type', 'functional_cluster_id']]
-
-        node_df = pd.concat([node_df, node_df_2])
-        node_df['name'] = node_df.index
-
-        mask = node_df["functional_cluster_id"].notna()
-        node_df.loc[mask, "ath_homologues"] = node_df["name"]
-
-        node_df.to_csv(node_path, sep="\t")
-
-        if clean:
-            # delete the downloaded files
-            node_path_1.unlink()
-            node_path_2.unlink()
-
-        print("Success.")
-
-    else:
-        node_df = pd.read_csv(node_path, sep="\t")
-        node_df.set_index("name", inplace=True, drop=False)
-
-    nx.set_node_attributes(g, node_df.to_dict('index'))
-
-    for _, data in g.nodes(data=True):
-        if data["node_type"] in ("PlantCoding", "PlantAbstract", "PlantNonCoding"):
-            data["display_label"] = data["short_name"]
-        else:
-            data["display_label"] = data["name"]
-
-    return g
 
 def ckn_to_networkx(
         edge_path=None,

@@ -1,0 +1,37 @@
+source	role	target	directed	reaction_id	edge_type	role_sbo	location	location_putative	form
+SAMS[fc00146]	catalyst	rx00001	True	rx00001	ACTIVATES	SBO:0000013	cytoplasm	False	protein_active
+rx00001	product	SAMe	True	rx00001	PRODUCT	SBO:0000011	cytoplasm	False	metabolite
+L-Met	substrate	rx00001	True	rx00001	SUBSTRATE	SBO:0000015	cytoplasm	False	metabolite
+ACS[fc00009]	catalyst	rx00002	True	rx00002	ACTIVATES	SBO:0000013	cytoplasm	False	protein_active
+rx00002	product	ACC	True	rx00002	PRODUCT	SBO:0000011	cytoplasm	False	metabolite
+SAMe	substrate	rx00002	True	rx00002	SUBSTRATE	SBO:0000015	cytoplasm	False	metabolite
+Cu2+	modifier	rx00005	True	rx00005	ACTIVATES	SBO:0000019	endoplasmic reticulum	False	metabolite
+rx00005	product	ETR[fc00075]	True	rx00005	PRODUCT	SBO:0000011	endoplasmic reticulum	False	protein_active
+ETR[fc00075]	substrate	rx00005	True	rx00005	SUBSTRATE	SBO:0000015	endoplasmic reticulum	False	protein
+rx00006	product	CTR|ETR	True	rx00006	PRODUCT	SBO:0000011	endoplasmic reticulum	False	complex
+CTR[fc00049]	interactor	rx00006	True	rx00006	SUBSTRATE	SBO:0000336	cytoplasm	False	protein_active
+ETR[fc00075]	interactor	rx00006	True	rx00006	SUBSTRATE	SBO:0000336	endoplasmic reticulum	False	protein_active
+RTE1[fc00142]	modifier	rx00007	True	rx00007	ACTIVATES	SBO:0000019	golgi apparatus	False	protein_active
+rx00007	product	CTR|ETR	True	rx00007	PRODUCT	SBO:0000011	endoplasmic reticulum	False	complex_active
+CTR|ETR	substrate	rx00007	True	rx00007	SUBSTRATE	SBO:0000015	endoplasmic reticulum	False	complex
+rx00008	product	ET|ETR	True	rx00008	PRODUCT	SBO:0000011	cytoplasm	False	complex_active
+ET	interactor	rx00008	True	rx00008	SUBSTRATE	SBO:0000336	cytoplasm	False	metabolite
+ETR[fc00075]	interactor	rx00008	True	rx00008	SUBSTRATE	SBO:0000336	endoplasmic reticulum	False	protein_active
+EIN5[fc00064]	inhibitor	rx00012	True	rx00012	INHIBITS	SBO:0000020	nucleus	False	protein_active
+EBF[fc00058]	template	rx00012	True	rx00012	SUBSTRATE	SBO:0000645	nucleus	False	gene
+rx00012	product	EBF[fc00058]	True	rx00012	PRODUCT	SBO:0000011	nucleus	False	protein_active
+EIN3(like)[fc00063]	stimulator	rx00019	True	rx00019	ACTIVATES	SBO:0000459	nucleus	False	protein_active
+ERF/EDF[fc00066]	template	rx00019	True	rx00019	SUBSTRATE	SBO:0000645	nucleus	False	gene
+rx00019	product	ERF/EDF[fc00066]	True	rx00019	PRODUCT	SBO:0000011	nucleus	False	protein_active
+LOX[fc00096]	catalyst	rx00026	True	rx00026	ACTIVATES	SBO:0000013	chloroplast	False	protein_active
+ALA	substrate	rx00026	True	rx00026	SUBSTRATE	SBO:0000015	chloroplast	False	metabolite
+rx00026	product	13-HPOT	True	rx00026	PRODUCT	SBO:0000011	chloroplast	False	metabolite
+TRX-H[fc00155]	modifier	rx00096	True	rx00096	ACTIVATES	SBO:0000019	cytoplasm	False	protein_active
+rx00096	product	NPR1[fc00115]	True	rx00096	PRODUCT	SBO:0000011	cytoplasm	False	protein
+NPR1|NPR1	substrate	rx00096	True	rx00096	SUBSTRATE	SBO:0000015	cytoplasm	False	complex_active
+WRKY57[fc00170]	inhibitor	rx00126	True	rx00126	INHIBITS	SBO:0000020	nucleus	False	protein_active
+SEN4[fc00148]	template	rx00126	True	rx00126	SUBSTRATE	SBO:0000645	nucleus	False	gene
+rx00126	product	SEN4[fc00148]	True	rx00126	PRODUCT	SBO:0000011	cytoplasm	False	protein_active
+WRKY33[fc00166]	stimulator	rx00160	True	rx00160	ACTIVATES	SBO:0000459	nucleus	False	protein_active
+WRKY33[fc00166]	template	rx00160	True	rx00160	SUBSTRATE	SBO:0000645	nucleus	False	gene
+rx00160	product	WRKY33[fc00166]	True	rx00160	PRODUCT	SBO:0000011	nucleus	False	protein
