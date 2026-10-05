@@ -1,4 +1,4 @@
-'''E.g. filter ckn on edge ranks'''
+'''CKN-specific filtering and annotation queries.'''
 
 import re
 from collections import defaultdict
@@ -11,6 +11,18 @@ ckn_ranks = [0, 1, 2, 3, 4]
 
 
 def rank_counts(g):
+    '''Count (and print) the edges of each CKN rank.
+
+    Parameters
+    ----------
+    g : networkx.Graph
+        CKN, e.g. from :func:`skm_tools.load_networks.ckn_to_networkx`.
+
+    Returns
+    -------
+    collections.defaultdict
+        Rank -> number of edges. Edges without a ``rank`` attribute are not counted.
+    '''
     counts = defaultdict(int)
     for _, _, data in g.edges(data=True):
         if 'rank' in data:
@@ -25,12 +37,23 @@ def filter_ckn_edges(g,
                      keep_edge_types=None,
                      filter_function=None,
                      remove_isolates=True):
-    '''
-    Updates CKN inplace.
+    '''Remove CKN edges, in place.
 
-    `filter_function` should return True, if the edge should be kept, false if it
-    should be removed.
+    The filters are combined: an edge is kept only if it passes all of them.
 
+    Parameters
+    ----------
+    g : networkx.Graph
+        CKN, e.g. from :func:`skm_tools.load_networks.ckn_to_networkx`. Changed in place.
+    keep_edge_ranks : int or list of int, optional
+        Keep only edges of these ranks (0: best supported, to 4). Edges without a
+        ``rank`` attribute are kept.
+    keep_edge_types : str or list of str, optional
+        Keep only edges of these ``type`` values (e.g. ``"binding"``).
+    filter_function : callable, optional
+        Called with each edge's attribute dict; return True to keep the edge.
+    remove_isolates : bool
+        Also remove nodes left without edges (default True).
     '''
     # / easier in reverse, but less intuitive...
     og_size = g.number_of_edges()
@@ -71,8 +94,29 @@ def filter_ckn_nodes(g,
                      species=None,
                      tissues=None,
                      remove_isolates=True):
-    '''
-    Inplace function
+    '''Remove CKN nodes, in place.
+
+    Complexes with a removed component are removed too.
+
+    Parameters
+    ----------
+    g : networkx.Graph
+        CKN, e.g. from :func:`skm_tools.load_networks.ckn_to_networkx`. Changed in place.
+    node_types : list of str, optional
+        Keep only nodes of these ``node_type`` values (e.g. ``"protein_coding"``, ``"metabolite"``).
+    species : list of str, optional
+        Keep only nodes of these species (e.g. ``["ath"]``); nodes without a species
+        (e.g. metabolites) are kept.
+    tissues : list of str, optional
+        Keep only nodes annotated with at least one of these tissues.
+    remove_isolates : bool
+        Also remove nodes left without edges (default True).
+
+    Returns
+    -------
+    dict
+        Removed node -> reason (``"wrong species"``, ``"wrong node type"``,
+        ``"wrong tissue type"``, ``"complex component removed"`` or ``"isolate"``).
     '''
     og_size = g.number_of_nodes()
 
@@ -164,6 +208,18 @@ def filter_ckn_nodes(g,
 
 
 def get_all_annotations(g, key):
+    '''All values of a list-valued node attribute.
+
+    Parameters
+    ----------
+    g : networkx.Graph
+    key : str
+        Node attribute holding a list (or None), e.g. ``"GMM"`` or ``"tissue"``.
+
+    Returns
+    -------
+    set
+    '''
     annots = {
         x
         for n, d in g.nodes(data=True) if d[key] is not None for x in d[key]
@@ -172,6 +228,22 @@ def get_all_annotations(g, key):
 
 
 def get_nodes_by_annotation(g, gmm=None, children=True):
+    '''Nodes with any of the given GMM (MapMan) annotations.
+
+    Parameters
+    ----------
+    g : networkx.Graph
+        CKN, with list-valued ``GMM`` node attributes.
+    gmm : list of str
+        GMM bins, e.g. ``["27.3"]`` or ``["27.3_RNA.regulation of transcription"]``.
+    children : bool
+        Also match the sub-bins of each bin (default True), e.g. ``27.3.1``, ``27.3.2``.
+
+    Returns
+    -------
+    list
+        Matching nodes (empty if `gmm` is not a list).
+    '''
 
     if is_listlike(gmm):
 
@@ -196,9 +268,21 @@ def get_nodes_by_annotation(g, gmm=None, children=True):
 
 
 def to_graph_tool(g):
-    """
-    Converts a networkx graph to a graph-tool graph.
-    https://bbengfort.github.io/2016/06/graph-tool-from-networkx/
+    """Convert a networkx graph to a graph-tool graph (structure only, no attributes).
+
+    Requires graph-tool (https://graph-tool.skewed.de), which is not a dependency of
+    skm-tools. Based on https://bbengfort.github.io/2016/06/graph-tool-from-networkx/.
+
+    Parameters
+    ----------
+    g : networkx.Graph
+
+    Returns
+    -------
+    gtG : graph_tool.Graph
+        With a vertex property ``id`` holding the networkx node id as a string.
+    vertices : dict
+        networkx node -> graph-tool vertex.
     """
 
     import graph_tool as gt

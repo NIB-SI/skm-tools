@@ -1,4 +1,4 @@
-'''Load from file or server to nx object'''
+'''Load the SKM networks (PSS and CKN) from file, or download them, as networkx graphs.'''
 
 from urllib.request import urlretrieve
 import csv
@@ -159,38 +159,34 @@ def ckn_to_networkx(
         directed=False,
         create_using=nx.DiGraph
     ):
-    ''' Load CKN from the compressed edge list format to a
-    networkx directed multigraph format, including node attributes
+    ''' Load CKN to a networkx directed graph, including node attributes.
+
+    Downloads the CKN files from skm.nib.si if they don't exist yet.
 
     Parameters
     ----------
-
     edge_path : str or pathlib.Path
-        Path to the edge list file,
-        if file does not exist, download from skm.nib.si
-
+        Path to the edge list file (tab-separated, optionally gzipped);
+        if the file does not exist, it is downloaded from skm.nib.si (gzipped, with a
+        ``.tsv.gz`` suffix).
     node_path : str or pathlib.Path
-        Path to the node annotation file,
-        if file does not exist, download from skm.nib.si
-
-    expanded : bool #TODO
-        Whether to use the expanded CKN. If False, use CKN
-        collapsed to a single edge between any pair of nodes.
-        Ignored if edge_path already exists
-
+        Path to the node annotation file; downloaded as for `edge_path`.
     add_reciprocal_edges : bool
-        Whether to add reciprocal edges of undirected edges
-        (necessary for doing directed path analysis).
-        e.g.
-            A-->B (undirected)
-        becomes
-            A-->B (undirected)
-            B-->A (undirected)
-        (in contrast to directed, and not meant to be used together)
-
+        Add the reverse of undirected edges (``isDirected`` == 0), so directed path
+        searches can use them in both directions (default True). Not meant to be used
+        together with `directed`. For example A -> B (undirected) becomes A -> B and B -> A.
     directed : bool
-        Whether to remove undirected edges from CKN
-        (in contrast to add_reciprocal_edges, and not meant to be used together)
+        Remove undirected edges, and the nodes left without edges (default False).
+    create_using : networkx graph class
+        Graph class to create (default ``networkx.DiGraph``; ``networkx.MultiDiGraph``
+        keeps parallel edges).
+
+    Returns
+    -------
+    networkx.DiGraph
+        CKN (or the `create_using` type). Node attributes ``GMM``, ``synonyms`` and
+        ``tissue`` are lists (or None); edges have ``effect``, ``type``, ``rank``,
+        ``species``, ``isDirected``, ``isTFregulation`` and ``interactionSources``.
     '''
     edge_path = Path(edge_path)
     node_path = Path(node_path)

@@ -1,6 +1,4 @@
-'''
-For analysing PSS/CKN for other species
-'''
+'''Translate Arabidopsis (ath) networks to other species with SKM gene translation files.'''
 from urllib.request import urlretrieve
 import pandas as pd
 from pathlib import Path
@@ -11,10 +9,19 @@ from .skm_download_urls import GENE_TRANSLATION_URL
 
 
 def load_translation_file(species_code, translation_path):
-    """Download and load the translation file for the given species.
+    """Load a SKM gene translation file, downloading it from skm.nib.si if missing.
 
-    Note: it's also possible to just use "df = pd.read_csv(url, sep='\t')",
-    but forcing an explicit download allows for direct caching and offline use.
+    Parameters
+    ----------
+    species_code : str
+        SKM species code of the translation (e.g. ``"parm"`` for apricot).
+    translation_path : str or pathlib.Path
+        Local file; downloaded here if it doesn't exist (so it can be reused offline).
+
+    Returns
+    -------
+    pandas.DataFrame
+        The translation table.
     """
 
     translation_path = Path(translation_path)
@@ -38,48 +45,50 @@ def integrate_translation_ckn(g,
                               edges_within_translation=True,
                               edges_across_translation=True,
                               keep_unmapped=True):
-    """
-    g - networkx object, with ath gene identifiers
+    """Translate the Arabidopsis genes of CKN to another species' gene identifiers.
 
-    translation can be by full replacement of the original nodes with new nodes representing the corresponding gene identifiers from the translation file,
-     multiple translations of the same original node will result in multiple new nodes, each representing one of the translations.
-     Edges from the original node are multiplied across the new nodes.
-    or by adding "pendant" nodes with the new gene identifiers and connecting them to the original nodes with edges.
+    Each ``ath`` node (other than complexes) is replaced by one node per translation of
+    its gene; translations can be many-to-many, and all are kept. Translated node ids are
+    ``{original}_{translation}``, so one original can have several translations. Edges of
+    the original node are copied to every new node. Nodes of other species are copied as is.
 
-    for now only implement full replacement
+    Parameters
+    ----------
+    g : networkx.Graph
+        CKN with Arabidopsis gene identifiers (``species`` == ``"ath"``).
+    translation_df : pandas.DataFrame
+        Translation table, e.g. from :func:`load_translation_file`, with a source
+        (Arabidopsis) and a target identifier column.
+    g_source_attribute : str
+        Node attribute of `g` with the Arabidopsis identifier (default ``"TAIR"``).
+    t_source_col : str
+        Column of `translation_df` with the Arabidopsis identifiers (default ``"ath_source"``).
+    t_target_col : str
+        Column of `translation_df` with the target species' identifiers (default ``"apricot"``).
+    method : {"full_replacement"}
+        How to add the translations. Only ``"full_replacement"`` (replace the original nodes)
+        is implemented; ``"pendant_nodes"`` (add translations as extra nodes linked to the
+        originals) is planned.
+    edges_within_translation : bool
+        Link the translations of the same original node to each other (``type`` ==
+        ``"translation"``, ``translation_relation`` == ``"same_translation_source"``).
+    edges_across_translation : bool
+        Link the nodes of different originals that translate to the same gene
+        (``translation_relation`` == ``"same_translation_target"``).
+    keep_unmapped : bool
+        Keep ``ath`` nodes without a translation (with ``translated`` False), or drop them.
 
-    translations can be many-to-many, keep all (duplicate nodes)
+    Returns
+    -------
+    networkx.Graph
+        A new graph: a (Multi)DiGraph if `g` is directed, a (Multi)Graph otherwise; a
+        multigraph if either kind of translation edge is added. Translated nodes get the
+        attributes ``translation``, ``translated_from`` and ``translated``.
 
-    Translated node ids become {original}_{translation} to avoid conflicts and allow for multiple translations of the same original node.
-
-
-    Parameters:
-    ===========
-
-    g: networkx graph
-
-    translation_df: pandas DataFrame containing the translation information, with at least two columns: one for the source identifiers and one for the target identifiers.
-
-    g_source_attribute: str
-        the node attribute in the graph that contains the source identifiers (e.g. 'TAIR').
-
-    t_source_col: str
-        the column in the translation DataFrame that contains the source identifiers (e.g. 'ath_source').
-
-    t_target_col: str
-        the column in the translation DataFrame that contains the target identifiers (e.g. 'apricot').
-
-    method: str
-        How to integrate the translation into the graph. Options:
-        - 'full_replacement': replace the nodes in g with nodes representing the corresponding gene identifiers from the translation file.
-        - 'pendant_nodes': add "pendant" nodes with the new gene identifiers to g and connect them to the original nodes with edges.
-
-    edges_within_translation: bool
-        Whether to add supplemental edges between translated nodes if they share a common original node. Only relevant for method 'full_replacement'.
-
-    edges_across_translation: bool
-        Whether to add supplemental edges between translated nodes from the same gene, but different original nodes. Only relevant for method 'full_replacement'.
-
+    Raises
+    ------
+    NotImplementedError
+        For a `method` other than ``"full_replacement"``.
     """
 
     if method != 'full_replacement':

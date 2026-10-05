@@ -1,3 +1,9 @@
+'''Batch export of Cytoscape networks to PDF.
+
+Requires the ``cytoscape`` and ``pdf`` extras (``pip install skm-tools[cytoscape,pdf]``)
+and a running Cytoscape.
+'''
+
 import io, re
 
 import py4cytoscape as p4c
@@ -38,7 +44,15 @@ def _create_text_pdf(text, mb, font, font_size):
     return new_pdf
 
 def export_collection_to_pdfs(collection_suid, folder):
-    '''Collection to a pdf per network'''
+    '''Export each network of a Cytoscape collection to its own cropped PDF.
+
+    Parameters
+    ----------
+    collection_suid : int
+        SUID of the Cytoscape collection.
+    folder : pathlib.Path
+        Output folder (created if missing). Files are named after the networks.
+    '''
 
     networks = sorted(p4c.collections.get_collection_networks(collection_suid))
 
@@ -61,8 +75,21 @@ def export_collection_to_pdfs(collection_suid, folder):
     print(f'Collection saved to {str(folder)}')
 
 def export_collection_to_single_pdf(collection_suid, filename, font_size=20, caption=True, font='Helvetica'):
-    '''Collection to single pdf document'''
-    '''requires pdf libraries'''
+    '''Export all networks of a Cytoscape collection to one PDF, one cropped page per network.
+
+    Parameters
+    ----------
+    collection_suid : int
+        SUID of the Cytoscape collection.
+    filename : pathlib.Path
+        PDF file to write.
+    font_size : int
+        Caption font size (default 20).
+    caption : bool
+        Write the network name under each page (default True).
+    font : str
+        Caption font (default Helvetica; falls back to the default font if unavailable).
+    '''
 
     networks = sorted(p4c.collections.get_collection_networks(collection_suid))
 

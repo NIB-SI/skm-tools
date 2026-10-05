@@ -251,8 +251,10 @@
             <visualProperty default="75.0" name="NODE_WIDTH">
                 <discreteMapping attributeName="node_type" attributeType="string">
                     <discreteMappingEntry attributeValue="Metabolite" value="60.0"/>
+                    <discreteMappingEntry attributeValue="MetaboliteFamily" value="60.0"/>
                     <discreteMappingEntry attributeValue="Process" value="100.0"/>
                     <discreteMappingEntry attributeValue="Complex" value="80.0"/>
+                    <discreteMappingEntry attributeValue="reaction" value="20.0"/>
                 </discreteMapping>
             </visualProperty>
             <visualProperty default="DefaultVisualizableVisualProperty(id=NODE_CUSTOMPAINT_9, name=Node Custom Paint 9)" name="NODE_CUSTOMPAINT_9"/>
@@ -289,6 +291,8 @@
             <visualProperty default="35.0" name="NODE_HEIGHT">
                 <discreteMapping attributeName="node_type" attributeType="string">
                     <discreteMappingEntry attributeValue="Metabolite" value="50.0"/>
+                    <discreteMappingEntry attributeValue="MetaboliteFamily" value="50.0"/>
+                    <discreteMappingEntry attributeValue="reaction" value="20.0"/>
                 </discreteMapping>
             </visualProperty>
             <visualProperty default="50.0" name="NODE_CUSTOMGRAPHICS_SIZE_5"/>
@@ -309,12 +313,18 @@
             <visualProperty default="ROUND_RECTANGLE" name="NODE_SHAPE">
                 <discreteMapping attributeName="node_type" attributeType="string">
                     <discreteMappingEntry attributeValue="PlantCoding" value="ELLIPSE"/>
+                    <discreteMappingEntry attributeValue="gene" value="ELLIPSE"/>
+                    <discreteMappingEntry attributeValue="ForeignCoding" value="ELLIPSE"/>
                     <discreteMappingEntry attributeValue="ForeignAbiotic" value="RECTANGLE"/>
                     <discreteMappingEntry attributeValue="Metabolite" value="DIAMOND"/>
+                    <discreteMappingEntry attributeValue="MetaboliteFamily" value="DIAMOND"/>
                     <discreteMappingEntry attributeValue="PlantNonCoding" value="HEXAGON"/>
+                    <discreteMappingEntry attributeValue="ForeignNonCoding" value="HEXAGON"/>
                     <discreteMappingEntry attributeValue="Process" value="ROUND_RECTANGLE"/>
                     <discreteMappingEntry attributeValue="PlantAbstract" value="OCTAGON"/>
+                    <discreteMappingEntry attributeValue="ForeignEntity" value="OCTAGON"/>
                     <discreteMappingEntry attributeValue="Complex" value="ROUND_RECTANGLE"/>
+                    <discreteMappingEntry attributeValue="reaction" value="RECTANGLE"/>
                 </discreteMapping>
             </visualProperty>
             <visualProperty default="org.cytoscape.cg.model.NullCustomGraphics,0,[ Remove Graphics ]," name="NODE_CUSTOMGRAPHICS_2"/>
@@ -380,11 +390,10 @@
             <visualProperty default="#FF0000" name="EDGE_SELECTED_PAINT"/>
             <visualProperty default="6.0" name="EDGE_SOURCE_ARROW_SIZE"/>
             <visualProperty default="NONE" name="EDGE_TARGET_ARROW_SHAPE">
-                <discreteMapping attributeName="interaction_type" attributeType="string">
-                    <discreteMappingEntry attributeValue="translocation" value="CROSS_OPEN_DELTA"/>
-                    <discreteMappingEntry attributeValue="binding" value="CIRCLE"/>
-                    <discreteMappingEntry attributeValue="inhibition" value="T"/>
-                    <discreteMappingEntry attributeValue="activation" value="ARROW"/>
+                <discreteMapping attributeName="interaction" attributeType="string">
+                    <discreteMappingEntry attributeValue="positive-influence" value="ARROW"/>
+                    <discreteMappingEntry attributeValue="negative-influence" value="T"/>
+                    <discreteMappingEntry attributeValue="unknown-influence" value="DIAMOND"/>
                 </discreteMapping>
             </visualProperty>
             <visualProperty default="" name="EDGE_LABEL"/>
@@ -395,9 +404,8 @@
             <visualProperty default="#848484" name="EDGE_STROKE_UNSELECTED_PAINT"/>
             <visualProperty default="#FFFF00" name="EDGE_TARGET_ARROW_SELECTED_PAINT"/>
             <visualProperty default="SOLID" name="EDGE_LINE_TYPE">
-                <discreteMapping attributeName="interaction_type" attributeType="string">
-                    <discreteMappingEntry attributeValue="translocation" value="DASH_DOT"/>
-                    <discreteMappingEntry attributeValue="binding" value="LONG_DASH"/>
+                <discreteMapping attributeName="directed" attributeType="boolean">
+                    <discreteMappingEntry attributeValue="false" value="LONG_DASH"/>
                 </discreteMapping>
             </visualProperty>
             <visualProperty default="2.0" name="EDGE_WIDTH"/>
@@ -405,11 +413,7 @@
             <visualProperty default="6.0" name="EDGE_TARGET_ARROW_SIZE"/>
             <visualProperty default="#000000" name="EDGE_LABEL_COLOR"/>
             <visualProperty default="0.0" name="EDGE_Z_ORDER"/>
-            <visualProperty default="NONE" name="EDGE_SOURCE_ARROW_SHAPE">
-                <discreteMapping attributeName="interaction_type" attributeType="string">
-                    <discreteMappingEntry attributeValue="binding" value="CIRCLE"/>
-                </discreteMapping>
-            </visualProperty>
+            <visualProperty default="NONE" name="EDGE_SOURCE_ARROW_SHAPE"/>
             <visualProperty default="false" name="EDGE_SELECTED"/>
             <visualProperty default="10" name="EDGE_LABEL_FONT_SIZE"/>
             <visualProperty default="#FFFF00" name="EDGE_SOURCE_ARROW_SELECTED_PAINT"/>

@@ -1,4 +1,8 @@
-'''E.g. filter PSS by species '''
+'''PSS-specific filtering, simplification and rewiring.
+
+For the PSS interaction network and gene networks loaded with
+:mod:`skm_tools.load_networks`.
+'''
 
 import networkx as nx
 
@@ -6,7 +10,21 @@ from .utils import remove_isolate_nodes, unique_item
 
 
 def remove_deadend_complexes(g):
+    '''Remove complexes without outgoing edges, in place.
 
+    A complex that influences nothing is a dead end in directed analyses. Repeated
+    (up to five times) since removing one complex can leave another without outgoing edges.
+
+    Parameters
+    ----------
+    g : networkx.DiGraph or networkx.MultiDiGraph
+        PSS network. Changed in place.
+
+    Returns
+    -------
+    list
+        The removed complexes.
+    '''
     removed_complexes = []
 
     # do five times
@@ -32,8 +50,28 @@ def remove_deadend_complexes(g):
 
 
 def filter_pss_nodes(g, node_types=None, species=None, remove_isolates=True):
-    '''
-    Inplace function
+    '''Remove PSS nodes, in place.
+
+    Complexes with a removed component are removed too (using the ``components``
+    node attribute; components not in `g` are ignored).
+
+    Parameters
+    ----------
+    g : networkx.Graph
+        PSS interaction network or gene network. Changed in place.
+    node_types : list of str, optional
+        Keep only nodes of these ``node_type`` values (e.g. ``"PlantCoding"``, ``"Complex"``).
+    species : list of str, optional
+        Remove ``PlantCoding`` and ``PlantNonCoding`` nodes without homologues in any of
+        these species (``<species>_homologues`` attributes, e.g. ``["stu"]``).
+    remove_isolates : bool
+        Also remove nodes left without edges (default True).
+
+    Returns
+    -------
+    dict
+        Removed node -> reason (``"species missing"``, ``"wrong node type"``,
+        ``"complex component removed"`` or ``"isolate"``).
     '''
     og_size = g.number_of_nodes()
 
@@ -95,25 +133,29 @@ def filter_pss_nodes(g, node_types=None, species=None, remove_isolates=True):
 
 
 def simplify_pss(g, split_on_attrs=None):
-    '''
-    From MultiDiGraph to DiGraph by merging parallel edges
-    Returns a new graph (not inplace function!)
+    '''Merge parallel edges (one per reaction) into one edge per node pair.
 
-    All reaction_ids are kept, joined with a comma. For every other edge attribute present on
-    the edges being merged, a single value is kept, and a warning if multiple non-unique values
-    were observed.
+    Returns a new graph; `g` is unchanged. For the interaction network or a gene network,
+    not the reaction graph.
 
-    `split_on_attrs` optionally gives a list of edge attribute names (e.g. ["reaction_effect"])
-    that should NOT be merged away: parallel edges are only merged with others that share the
-    same value for every attribute in `split_on_attrs`, so edges that differ on any of them are
-    kept as separate edges instead of being collapsed into one. Because this can leave more than
-    one edge between the same node pair, the returned graph is a nx.MultiDiGraph in that case.
-    With `split_on_attrs` omitted/empty, behaviour is unchanged and the returned graph is a plain
-    nx.DiGraph.
+    Parameters
+    ----------
+    g : networkx.MultiDiGraph
+        PSS interaction network or gene network.
+    split_on_attrs : list of str, optional
+        Edge attributes (e.g. ``["interaction"]``) that must not be merged away: parallel
+        edges are only merged with others that have the same values for all of them.
 
-    For the interaction network or a gene network (load_networks.pss_interaction_network_to_networkx,
-    load_networks.pss_gene_network_to_networkx), not the reaction graph.
+    Returns
+    -------
+    networkx.DiGraph or networkx.MultiDiGraph
+        A DiGraph, or a MultiDiGraph with `split_on_attrs` (as edges that differ on them
+        stay separate). Merged edges get all ``reaction_id`` values, comma-joined; for every
+        other attribute a single value is kept, with a printed warning when the merged
+        edges had different values (e.g. a positive and a negative influence).
 
+    Notes
+    -----
     TODO - hierarchy for keeping attributes?
     '''
 
@@ -160,17 +202,31 @@ def simplify_pss(g, split_on_attrs=None):
 
 
 def remove_and_rewire(g, nodes, dry_run=False):
-    '''
-    Removes nodes, replacing with edges from all upstream to all downstream nodes.
+    '''Remove nodes, connecting each of their upstream nodes to each downstream node.
 
-    Prints a summary of nodes that are removed, but no edges created to replace them.
+    Changes `g` in place. Mutual binding edges (partner <-> partner) are not propagated,
+    only the complex-forming ones (partner -> complex). Prints a summary of removed nodes
+    for which no replacement edges were created.
 
-    Use `dry_run=True` to get the summary, but not actually remove any of the nodes.
+    Parameters
+    ----------
+    g : networkx.DiGraph
+        A simple directed graph, e.g. from :func:`simplify_pss`. Multigraphs are not supported.
+    nodes : iterable
+        Nodes to remove (nodes not in `g` are ignored).
+    dry_run : bool
+        Only print the summary; don't change `g`.
 
-    For new edge attributes, all reaction_ids are kept, for other edge attributes, a single value is kept,
-    NO WARNING if multiple non-unique were observed.
+    Raises
+    ------
+    NotImplementedError
+        If `g` is a multigraph or undirected.
 
-    TODO - hierarchy for keeping attributes?
+    Notes
+    -----
+    New edges get all ``reaction_id`` values of the two edges they replace, comma-joined, and a
+    single value of ``reaction_type``, ``reaction_effect`` and ``interaction`` (without a warning
+    if they differ), plus a ``note``. TODO - hierarchy for keeping attributes?
     '''
 
     def generate_dict():
@@ -308,14 +364,16 @@ def remove_and_rewire(g, nodes, dry_run=False):
 
 
 def remove_duplicated_binding_edges(g):
-    '''Removes one if there are two binding edges between the same nodes from a "binding/oligomerisation" reaction
-    Which edge is removed is arbitrary.
+    '''Keep one direction of each mutual binding edge, in place.
 
-    Do not run this before doing directed paths/neighbour analysis.
+    Binding partners are linked in both directions (A -> B and B -> A, same reaction); this
+    removes one of the two (which one is arbitrary), e.g. for a less cluttered drawing.
+    Don't use it before directed path or neighbourhood analysis.
 
-    Works on both a single-edge DiGraph (e.g. from pss_utils.simplify_pss) and a MultiDiGraph
-    (e.g. from pss_utils.simplify_pss with split_on_attrs, or the raw loaded network) -
-    each parallel edge is considered individually.
+    Parameters
+    ----------
+    g : networkx.DiGraph or networkx.MultiDiGraph
+        PSS network (each parallel edge of a multigraph is considered separately). Changed in place.
     '''
 
     is_multi = g.is_multigraph()
