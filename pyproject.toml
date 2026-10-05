@@ -15,6 +15,7 @@ pandas = ">=1.4"
 [tool.poetry.extras]
 cytoscape = ["py4cytoscape"]
 pdf = ["pypdf", "pdfCropMargins", "reportlab"]
+docs = ["sphinx", "sphinx-rtd-theme", "sphinx-autoapi", "nbsphinx", "nbsphinx-link", "ipython"]
 
 [tool.poetry.group.cytoscape.dependencies]
 py4cytoscape = { version = "*", optional = true }
@@ -23,6 +24,14 @@ py4cytoscape = { version = "*", optional = true }
 pypdf = { version = "*", optional = true }
 pdfCropMargins = { version = "*", optional = true }
 reportlab = { version = "*", optional = true }
+
+[tool.poetry.group.docs.dependencies]
+sphinx = { version = "*", optional = true }
+sphinx-rtd-theme = { version = "*", optional = true }
+sphinx-autoapi = { version = "*", optional = true }
+nbsphinx = { version = "*", optional = true }
+nbsphinx-link = { version = "*", optional = true }
+ipython = { version = "*", optional = true }
 
 [tool.poetry.group.dev.dependencies]
 pytest = ">=7.0"

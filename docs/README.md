@@ -37,6 +37,22 @@ In this case study, we analysed the results of a proteimics study of arabidopsis
 
 Includes demonstration of: 1, 2, 3, 4, 5, 6, 7
 
+## Documentation
+
+[nib-si.github.io/skm-tools](https://nib-si.github.io/skm-tools)
+
+The documentation is built with Sphinx (sphinx-rtd-theme, sphinx-autoapi, nbsphinx), declared as the `docs` optional
+dependency group in `pyproject.toml`. To build it locally:
+
+    pip install ".[docs]"
+    cd docs
+    make clean
+    make html
+
+and open `docs/build/html/index.html`. It is built and deployed to GitHub Pages by `.github/workflows/deploy-docs.yml`
+on every push to `main` that changes `docs/` or `skm_tools/`. Docstrings follow the
+[numpy style](https://www.sphinx-doc.org/en/master/usage/extensions/example_numpy.html#example-numpy).
+
 ## Install and requirements
 
 The only required non-default library is networkX (https://networkx.org/).

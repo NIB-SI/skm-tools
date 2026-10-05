@@ -96,10 +96,10 @@ def pss_reaction_graph_to_networkx(edge_path, node_path):
     ----------
 
     edge_path : str or pathlib.Path
-        Path to the edge file (pss-reaction-graph-edges-*.tsv)
+        Path to the edge file (``pss-reaction-graph-edges-*.tsv``)
 
     node_path : str or pathlib.Path
-        Path to the node file (pss-reaction-graph-nodes-*.tsv)
+        Path to the node file (``pss-reaction-graph-nodes-*.tsv``)
     '''
     return _pss_export_to_networkx(edge_path, node_path, edge_key="role")
 
@@ -118,10 +118,10 @@ def pss_interaction_network_to_networkx(edge_path, node_path):
     ----------
 
     edge_path : str or pathlib.Path
-        Path to the edge file (pss-interaction-network-edges-*.tsv)
+        Path to the edge file (``pss-interaction-network-edges-*.tsv``)
 
     node_path : str or pathlib.Path
-        Path to the node file (pss-interaction-network-nodes-*.tsv)
+        Path to the node file (``pss-interaction-network-nodes-*.tsv``)
     '''
     return _pss_export_to_networkx(edge_path, node_path, edge_key="reaction_id")
 
@@ -143,10 +143,10 @@ def pss_gene_network_to_networkx(edge_path, node_path):
     ----------
 
     edge_path : str or pathlib.Path
-        Path to the edge file (pss-gene-network-<species>-edges-*.tsv)
+        Path to the edge file (``pss-gene-network-<species>-edges-*.tsv``)
 
     node_path : str or pathlib.Path
-        Path to the node file (pss-gene-network-<species>-nodes-*.tsv)
+        Path to the node file (``pss-gene-network-<species>-nodes-*.tsv``)
     '''
     return _pss_export_to_networkx(edge_path, node_path, edge_key="reaction_id",
                                   node_list_columns=_PSS_GENE_CLUSTER_COLUMNS)
