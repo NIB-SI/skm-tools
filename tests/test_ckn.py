@@ -88,7 +88,14 @@ def test_metabolite_species_na_is_missing(ckn_edge_path, ckn_node_path):
     g = ckn_to_networkx(ckn_edge_path, ckn_node_path)
     metabolites = [d for _, d in g.nodes(data=True) if d["node_type"] == "metabolite"]
     assert metabolites
-    assert all(pd.isna(d["species"]) for d in metabolites)
+    assert all(d["species"] is None for d in metabolites)
+
+
+def test_empty_values_are_none(ckn_edge_path, ckn_node_path):
+    g = ckn_to_networkx(ckn_edge_path, ckn_node_path)
+    values = [v for _, d in g.nodes(data=True) for v in d.values()]
+    assert None in values
+    assert not any(isinstance(v, float) and v != v for v in values)  # no NaN
 
 
 def test_filter_ckn_nodes_species_keeps_nodes_without_species(ckn_edge_path, ckn_node_path):

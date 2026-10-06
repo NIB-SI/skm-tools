@@ -49,8 +49,8 @@ def ckn_to_networkx(
     Returns
     -------
     networkx.DiGraph
-        CKN (or the `create_using` type). Node attributes ``GMM``, ``synonyms`` and
-        ``tissue`` are lists (or None); edges have ``effect``, ``type``, ``rank``,
+        CKN (or the `create_using` type). Empty node and edge attribute values are None.
+        Node attributes ``GMM``, ``synonyms`` and ``tissue`` are lists (or None); edges have ``effect``, ``type``, ``rank``,
         ``species``, ``isDirected``, ``isTFregulation`` and ``interactionSources``.
     '''
     edge_path = Path(edge_path)
@@ -101,14 +101,22 @@ def ckn_to_networkx(
                         ('interactionSources', str)
                     ])
 
+    # empty values as None, as for the nodes
+    for *_, data in g.edges(data=True):
+        for k, v in data.items():
+            if v == '':
+                data[k] = None
+
     if node_compressed:
         node_df = pd.read_csv(node_path, na_values=['', 'N/A'], keep_default_na=False, sep="\t", compression="gzip")
     else:
         node_df = pd.read_csv(node_path, na_values=['', 'N/A'], keep_default_na=False, sep="\t")
 
     node_df.set_index("node_ID", inplace=True)
+    # empty values as None (not NaN), as in the PSS loaders
+    node_df = node_df.astype(object).where(node_df.notna(), None)
 
-    clean_list = lambda x, delim: [y.strip() for y in x.split(delim)] if not pd.isna(x) else None
+    clean_list = lambda x, delim: [y.strip() for y in x.split(delim)] if x is not None else None
     for attr, delim in [("GMM", "|"), ("synonyms", "|"), ("tissue", ",")]:
         node_df[attr] = node_df[attr].apply(clean_list, delim=delim)
 
@@ -258,7 +266,7 @@ def filter_ckn_nodes(g,
             # missing requested species
             if not (data['species'] in species)
             # but not a "nan" species (e.g. metabolites)
-            and pd.notna(data['species'])
+            and data['species'] is not None
         ]
         to_remove.update(no_species)
         reasons = {
