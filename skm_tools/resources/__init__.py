@@ -1,15 +1,22 @@
-'''Bundled resources: the SKM Cytoscape styles (PSS-default and CKN-default).'''
+'''Bundled resources: the SKM Cytoscape styles (SKM and SKM-reactions).'''
 
 import os
 
 # visualisation
-STYLE_XML = "skm-default-styles.xml"
-PSS_DEFAULT_STYLE = "PSS-default"
-CKN_DEFAULT_STYLE = "CKN-default"
-BUILTIN_STYLES = ['pss', 'ckn']
+STYLE_XML = "skm-styles.xml"
+
+# apply_builtin_style name -> Cytoscape style name
+BUILTIN_STYLES = {
+    "skm": "SKM",                       # CKN, PSS interaction network, PSS gene networks
+    "skm-reactions": "SKM-reactions",   # PSS reaction graph
+    # older names, for existing notebooks
+    "pss": "SKM",
+    "ckn": "SKM",
+}
+
 
 def get_style_xml_path():
-    '''Path to the bundled Cytoscape style file (skm-default-styles.xml).
+    '''Path to the bundled Cytoscape style file (skm-styles.xml).
 
     Returns
     -------

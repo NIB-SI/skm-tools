@@ -48,15 +48,24 @@ the SKM styles; without it, Cytoscape uses its default style.
 
 .. code-block:: python
 
-   suid = cu.load_network(pss, title="PSS", style="pss")
+   suid = cu.load_network(pss, title="PSS", style="skm")
 
 The SKM styles are bundled with skm-tools, and imported into Cytoscape the first time
-they are used (also with :func:`~skm_tools.cytoscape_utils.apply_builtin_style`):
+they are used (also with :func:`~skm_tools.cytoscape_utils.apply_builtin_style`). CKN and
+PSS use the same node classes (``node_type``) and edge attributes, so they share a style:
 
-- ``"pss"`` (*PSS-default*): node shape by ``node_type``, fill colour by ``pathway``; edge
-  arrows by ``interaction`` (positive: arrow, negative: T, unknown: diamond), and dashed
-  lines for mutual (``directed`` False) edges.
-- ``"ckn"`` (*CKN-default*).
+- ``"skm"`` (*SKM*): for CKN, the PSS interaction network and the PSS gene networks.
+  Nodes are coloured and shaped by ``node_type``, in the colours of the PSS Explorer, and
+  labelled with ``display_label``. Edges are coloured, and get their arrow, by
+  ``interaction`` (positive: green, negative: red, unknown: grey); mutual (``directed``
+  False) edges are dashed, and better supported edges (lower ``rank``) are thicker.
+- ``"skm-reactions"`` (*SKM-reactions*): for the PSS reaction graph. The same nodes, plus
+  the reactions (blue); edges as in the PSS Explorer, by ``edge_type`` (activation: green,
+  inhibition: red, substrate and product: grey), labelled with the participant's
+  ``role``.
+
+To change a style for one analysis, copy it first (see
+:func:`~skm_tools.cytoscape_utils.copy_style`), so the original stays as it is.
 
 Highlighting
 ============
@@ -148,7 +157,7 @@ node. This takes three steps:
 
    images = cu.match_files_to_nodes("heatmaps", pss.nodes())
    cu.load_node_images(images, "heatmap", network=suid)
-   cu.show_node_images("PSS-default", "heatmap")
+   cu.show_node_images("SKM", "heatmap")
 
 Matching files to nodes
 -----------------------
@@ -177,7 +186,7 @@ in its own slot and position:
    for omics, slot, position in [("transcriptomics", 1, "above"), ("metabolomics", 2, "below")]:
        images = cu.match_files_to_nodes(f"heatmaps/{omics}", pss.nodes())
        cu.load_node_images(images, f"image_{omics}", network=suid)
-       cu.show_node_images("PSS-default", f"image_{omics}", slot=slot, position=position)
+       cu.show_node_images("SKM", f"image_{omics}", slot=slot, position=position)
 
 The position puts a side of the image against a side of the node, centred:
 
@@ -209,7 +218,7 @@ condition's column:
        cu.load_node_images(images, f"image_{condition}", network=suid, unique_dir="images")
 
        copy = cu.clone_network(suid, name=condition, collection=f"PSS - {condition}")
-       style = cu.copy_style("PSS-default", f"PSS-default-{condition}", networks=[copy])
+       style = cu.copy_style("SKM", f"SKM-{condition}", networks=[copy])
        cu.show_node_images(style, f"image_{condition}")
 
 :func:`~skm_tools.cytoscape_utils.clone_network` copies the network into a new collection,
@@ -267,7 +276,7 @@ like images:
    # df: logFC per gene (rows) and time point (columns)
    charts = cu.chart_column(df, ["10min", "30min", "1h"], "#E41A1C", value_range=(-2, 2))
    p4c.load_table_data(charts.to_frame("chart"), network=suid)
-   cu.show_node_images("PSS-default", "chart")
+   cu.show_node_images("SKM", "chart")
 
 Exporting
 =========

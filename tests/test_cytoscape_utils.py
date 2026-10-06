@@ -32,7 +32,7 @@ def _get_table_columns(table="node", columns=None, network=None):
 def p4c():
     with patch.object(cu, "p4c") as mock:
         mock.tables.get_table_columns.side_effect = _get_table_columns
-        mock.styles.get_current_style.return_value = "PSS-default"
+        mock.styles.get_current_style.return_value = "SKM"
         yield mock
 
 
@@ -117,8 +117,8 @@ def test_clone_network_without_names(p4c):
 
 
 def test_copy_style_applies_to_networks(p4c):
-    assert cu.copy_style("PSS-default", "PSS-heat", networks=[1, 2]) == "PSS-heat"
-    p4c.copy_visual_style.assert_called_once_with("PSS-default", "PSS-heat")
+    assert cu.copy_style("SKM", "SKM-heat", networks=[1, 2]) == "SKM-heat"
+    p4c.copy_visual_style.assert_called_once_with("SKM", "SKM-heat")
     assert [c.kwargs["network"] for c in p4c.set_visual_style.call_args_list] == [1, 2]
 
 
@@ -209,7 +209,7 @@ def test_load_node_images(p4c, tmp_path):
 
 
 def test_show_node_images(p4c):
-    cu.show_node_images("PSS-heat", "image_heat", slot=2, position="above", size=90)
+    cu.show_node_images("SKM-heat", "image_heat", slot=2, position="above", size=90)
 
     p4c.style_mappings.map_visual_property.assert_called_once_with(
         visual_prop="NODE_CUSTOMGRAPHICS_2", table_column="image_heat", mapping_type="p")
@@ -226,7 +226,7 @@ def test_add_custom_png(p4c, tmp_path):
     cu.add_custom_png(7, lambda n: tmp_path / f"{n}.png" if n == "A" else None)
 
     assert list(p4c.load_table_data.call_args.args[0].index) == ["A"]
-    p4c.style_dependencies.sync_node_custom_graphics_size.assert_called_once_with(False, style_name="PSS-default")
+    p4c.style_dependencies.sync_node_custom_graphics_size.assert_called_once_with(False, style_name="SKM")
 
 
 def test_chart_column():
@@ -278,3 +278,56 @@ def test_silence_py4cytoscape(capsys):
 
     e = CyError("silenced again")
     assert capsys.readouterr().err == "" and "silenced again" in str(e)
+
+
+def test_set_style_makes_network_current_first(p4c):
+    cu.set_style("SKM", 7)
+    names = [c[0] for c in p4c.mock_calls]
+    assert names.index("set_current_network") < names.index("set_visual_style")
+    p4c.set_current_network.assert_called_once_with(7)
+    p4c.set_visual_style.assert_called_once_with("SKM", network=7)
+
+
+# ---------------------------------------------------------------------------
+# Bundled styles
+# ---------------------------------------------------------------------------
+
+def _bundled_styles():
+    import xml.etree.ElementTree as ET
+    from skm_tools import resources
+    return {vs.get("name"): vs for vs in ET.parse(resources.get_style_xml_path()).getroot().iter("visualStyle")}
+
+
+def test_bundled_xml_has_the_builtin_styles():
+    from skm_tools import resources
+    assert set(resources.BUILTIN_STYLES.values()) <= set(_bundled_styles())
+
+
+def test_bundled_styles_map_node_type_to_pss_classes_only():
+    old = {"gene", "protein_coding", "metabolite", "complex", "biotic", "abiotic", "mirna"}
+    for name, vs in _bundled_styles().items():
+        for vp in vs.iter("visualProperty"):
+            for m in vp.iter("discreteMapping"):
+                if m.get("attributeName") == "node_type":
+                    values = {e.get("attributeValue") for e in m.iter("discreteMappingEntry")}
+                    assert not values & old, (name, vp.get("name"))
+
+
+@pytest.mark.parametrize("key, expected", [("skm", "SKM"), ("SKM-reactions", "SKM-reactions"),
+                                           ("pss", "SKM"), ("ckn", "SKM")])
+def test_apply_builtin_style_imports_once_and_applies(p4c, key, expected):
+    p4c.styles.get_visual_style_names.return_value = ["default"]
+    cu.apply_builtin_style(7, key)
+    p4c.import_visual_styles.assert_called_once()
+    p4c.set_visual_style.assert_called_once_with(expected, network=7)
+
+
+def test_apply_builtin_style_does_not_reimport(p4c):
+    p4c.styles.get_visual_style_names.return_value = ["default", "SKM"]
+    cu.apply_builtin_style(7)
+    p4c.import_visual_styles.assert_not_called()
+
+
+def test_apply_builtin_style_unknown(p4c):
+    with pytest.raises(ValueError, match="skm-reactions"):
+        cu.apply_builtin_style(7, "fancy")

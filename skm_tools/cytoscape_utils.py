@@ -149,6 +149,25 @@ def _edge_suids(edge_pairs, network=None):
 # Loading and styling
 # ---------------------------------------------------------------------------
 
+def set_style(style, network=None):
+    '''Apply a visual style to one network.
+
+    Cytoscape also applies the style to the network(s) selected in its *Network* panel,
+    so ``py4cytoscape.set_visual_style`` can change other networks too. This makes
+    `network` the current (selected) network first.
+
+    Parameters
+    ----------
+    style : str
+        Visual style name.
+    network : int or str, optional
+        Cytoscape network (default: the current network).
+    '''
+    if network is not None:
+        p4c.set_current_network(network)
+    p4c.set_visual_style(style, network=network)
+
+
 def load_network(g, title, collection=None, style=None):
     '''Load a networkx graph into Cytoscape.
 
@@ -161,8 +180,9 @@ def load_network(g, title, collection=None, style=None):
         Network name in Cytoscape.
     collection : str, optional
         Collection to add the network to (default: a new collection named `title`).
-    style : {"pss", "ckn"}, optional
-        Built-in SKM style to apply (see :func:`apply_builtin_style`).
+    style : {"skm", "skm-reactions"}, optional
+        Built-in SKM style to apply (see :func:`apply_builtin_style`); without it,
+        Cytoscape's default style.
 
     Returns
     -------
@@ -175,34 +195,36 @@ def load_network(g, title, collection=None, style=None):
     return suid
 
 
-def apply_builtin_style(suid, style):
+def apply_builtin_style(suid, style="skm"):
     '''Apply one of the bundled SKM visual styles to a Cytoscape network.
 
-    The styles are imported into Cytoscape on first use.
+    The styles are imported into Cytoscape on first use (from ``skm-styles.xml``).
 
     Parameters
     ----------
     suid : int
         Cytoscape network SUID.
-    style : {"pss", "ckn"}
-        ``"pss"`` (PSS-default: shapes by ``node_type``, fill by ``pathway``, arrows by
-        ``interaction`` influence, dashed for mutual (``directed`` False) edges) or
-        ``"ckn"`` (CKN-default).
+    style : {"skm", "skm-reactions"}
+        ``"skm"`` (style *SKM*, default): for CKN, the PSS interaction network and the PSS
+        gene networks. Nodes by ``node_type`` (the PSS classes, in the PSS Explorer's
+        colours), labelled with ``display_label``; edges coloured and with arrows by
+        ``interaction``, dashed for mutual (``directed`` False) edges, and thicker for better
+        supported ones (``rank``).
+        ``"skm-reactions"`` (style *SKM-reactions*): for the PSS reaction graph, with
+        reactions as nodes, and edges by ``edge_type`` (activation, inhibition, substrate,
+        product, ...) labelled with their ``role``.
+        The older names ``"pss"`` and ``"ckn"`` apply *SKM*.
     '''
-    style = style.lower()
+    key = style.lower()
+    if key not in resources.BUILTIN_STYLES:
+        raise ValueError(f"apply_builtin_style expects one of {sorted(resources.BUILTIN_STYLES)}, "
+                         f"not {style!r}.")
+    style_name = resources.BUILTIN_STYLES[key]
 
-    if not (style in resources.BUILTIN_STYLES):
-        raise ValueError(f"apply_builtin_style expects a value in {resources.BUILTIN_STYLES}.")
-
-    style_name = {
-        'ckn':resources.CKN_DEFAULT_STYLE,
-        'pss':resources.PSS_DEFAULT_STYLE
-    }[style]
-
-    if not style_name in p4c.styles.get_visual_style_names():
+    if style_name not in p4c.styles.get_visual_style_names():
         p4c.import_visual_styles(resources.get_style_xml_path())
 
-    p4c.styles.set_visual_style(style_name, network=suid)
+    set_style(style_name, suid)
     print(f"Applied {style_name} to {suid}")
 
 
@@ -252,7 +274,7 @@ def highlight_nodes(node_names, colour=None, label_color=None, border_color=None
         if value:
             set_bypass(nodes_by_suid, value, network=network)
 
-    p4c.styles.set_visual_style(og_style, network=network)
+    set_style(og_style, network)
 
     return nodes_by_suid
 
@@ -452,7 +474,7 @@ def apply_shortest_paths_style(sources, path_lists, target, g, edge_colors=None,
             network=network
         )
 
-    p4c.styles.set_visual_style(new_style, network=network)
+    set_style(new_style, network)
 
 
 # ---------------------------------------------------------------------------
@@ -525,7 +547,7 @@ def copy_style(style, new_style, networks=()):
     '''
     p4c.copy_visual_style(style, new_style)
     for network in networks:
-        p4c.set_visual_style(new_style, network=network)
+        set_style(new_style, network)
     return new_style
 
 
@@ -717,7 +739,7 @@ def layout_from_coords(network, table):
 
     tmp_style = 'tmp-layout'
     p4c.copy_visual_style(current_style, tmp_style)
-    p4c.set_visual_style(tmp_style, network=network)
+    set_style(tmp_style, network)
 
     p4c.update_style_mapping(tmp_style, p4c.map_visual_property('NODE_X_LOCATION', 'x', 'p'))
     p4c.update_style_mapping(tmp_style, p4c.map_visual_property('NODE_Y_LOCATION', 'y', 'p'))
@@ -727,7 +749,7 @@ def layout_from_coords(network, table):
     p4c.tables.delete_table_column('x', network=network)
     p4c.tables.delete_table_column('y', network=network)
 
-    p4c.set_visual_style(current_style, network=network)
+    set_style(current_style, network)
 
 
 # ---------------------------------------------------------------------------
