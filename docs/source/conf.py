@@ -70,8 +70,7 @@ exclude_patterns = []
 html_theme = 'sphinx_rtd_theme'
 
 html_theme_options = {
-    # the SKM web app's green
-    'style_nav_header_background': '#00672c',
+    'style_nav_header_background': '#009739',
 }
 
 html_logo = '../figures/logo.png'
