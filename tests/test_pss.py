@@ -12,6 +12,7 @@ from skm_tools.pss import (
     pss_interaction_network_to_networkx,
     pss_reaction_graph_to_networkx,
     remove_and_rewire,
+    remove_deadend_complexes,
     remove_duplicated_binding_edges,
     simplify_pss,
 )
@@ -482,3 +483,25 @@ def test_filter_pss_nodes_interaction_network_cluster_node_removed():
 
     assert reasons["ETR[fc00075]"] == "species missing"
     assert reasons["CTR|ETR"] == "complex component removed"
+
+
+@pytest.mark.parametrize("func", [
+    lambda g: filter_pss_nodes(g, node_types=["Metabolite"]),
+    remove_deadend_complexes,
+    simplify_pss,
+    lambda g: remove_and_rewire(simplify_pss(g), []),
+    remove_duplicated_binding_edges,
+])
+def test_functions_reject_reaction_graph(func, pss_reaction_graph_edge_path, pss_reaction_graph_node_path):
+    g = pss_reaction_graph_to_networkx(pss_reaction_graph_edge_path, pss_reaction_graph_node_path)
+    with pytest.raises(ValueError, match="reaction graph"):
+        func(g)
+
+
+def test_filter_pss_nodes_species_rejected_on_gene_network(
+        pss_gene_network_ath_edge_path, pss_gene_network_ath_node_path):
+    g = pss_gene_network_to_networkx(pss_gene_network_ath_edge_path, pss_gene_network_ath_node_path)
+    n = g.number_of_nodes()
+    with pytest.raises(ValueError, match="one species"):
+        filter_pss_nodes(g, species=["stu"])
+    assert g.number_of_nodes() == n

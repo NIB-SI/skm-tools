@@ -203,6 +203,14 @@ def pss_gene_network_to_networkx(edge_path, node_path, species="ath"):
 # Filtering, simplifying and rewiring
 # ---------------------------------------------------------------------------
 
+def _check_not_reaction_graph(g, func):
+    '''The filtering and simplifying functions work on entity -> entity influences, so not on
+    the reaction graph (reactions as nodes, no ``interaction`` on the edges).'''
+    if any(d.get("node_type") == "reaction" for _, d in g.nodes(data=True)):
+        raise ValueError(f"{func} works on the PSS interaction network or a gene network, "
+                         "not the reaction graph (it has reaction nodes).")
+
+
 def remove_deadend_complexes(g):
     '''Remove complexes without outgoing edges, in place.
 
@@ -212,13 +220,19 @@ def remove_deadend_complexes(g):
     Parameters
     ----------
     g : networkx.DiGraph or networkx.MultiDiGraph
-        PSS network. Changed in place.
+        PSS interaction network or gene network (not the reaction graph). Changed in place.
 
     Returns
     -------
     list
         The removed complexes.
+
+    Raises
+    ------
+    ValueError
+        If `g` is the reaction graph.
     '''
+    _check_not_reaction_graph(g, "remove_deadend_complexes")
     removed_complexes = []
 
     # do five times
@@ -252,12 +266,15 @@ def filter_pss_nodes(g, node_types=None, species=None, remove_isolates=True):
     Parameters
     ----------
     g : networkx.Graph
-        PSS interaction network or gene network. Changed in place.
+        PSS interaction network or gene network (not the reaction graph). Changed in place.
     node_types : list of str, optional
-        Keep only nodes of these ``node_type`` values (e.g. ``"PlantCoding"``, ``"Complex"``).
+        Keep only nodes of these ``node_type`` values (e.g. ``"PlantCoding"``, ``"Complex"``;
+        in a gene network, genes are ``"gene"``).
     species : list of str, optional
-        Remove ``PlantCoding`` and ``PlantNonCoding`` nodes without homologues in any of
-        these species (``<species>_homologues`` attributes, e.g. ``["stu"]``).
+        Interaction network only: remove ``PlantCoding`` and ``PlantNonCoding`` nodes
+        (functional clusters) without genes in any of these species
+        (``<species>_homologues`` attributes, e.g. ``["stu"]``). A gene network is already
+        for one species.
     remove_isolates : bool
         Also remove nodes left without edges (default True).
 
@@ -266,7 +283,17 @@ def filter_pss_nodes(g, node_types=None, species=None, remove_isolates=True):
     dict
         Removed node -> reason (``"species missing"``, ``"wrong node type"``,
         ``"complex component removed"`` or ``"isolate"``).
+
+    Raises
+    ------
+    ValueError
+        If `g` is the reaction graph, or `species` is given for a gene network.
     '''
+    _check_not_reaction_graph(g, "filter_pss_nodes")
+    if species and any(d.get("node_type") == "gene" for _, d in g.nodes(data=True)):
+        raise ValueError("species filtering is for the interaction network; a gene network "
+                         "is already for one species (load the gene network of the species "
+                         "instead).")
     og_size = g.number_of_nodes()
 
     to_remove = set()
@@ -332,7 +359,7 @@ def simplify_pss(g, split_on_attrs=None):
     '''Merge parallel edges (one per reaction) into one edge per node pair.
 
     Returns a new graph; `g` is unchanged. For the interaction network or a gene network,
-    not the reaction graph.
+    not the reaction graph (raises ValueError).
 
     Parameters
     ----------
@@ -355,6 +382,7 @@ def simplify_pss(g, split_on_attrs=None):
     TODO - hierarchy for keeping attributes?
     '''
 
+    _check_not_reaction_graph(g, "simplify_pss")
     split_on_attrs = split_on_attrs or []
 
     new_g = nx.MultiDiGraph() if split_on_attrs else nx.DiGraph()
@@ -417,6 +445,8 @@ def remove_and_rewire(g, nodes, dry_run=False):
     ------
     NotImplementedError
         If `g` is a multigraph or undirected.
+    ValueError
+        If `g` is the reaction graph.
 
     Notes
     -----
@@ -432,6 +462,7 @@ def remove_and_rewire(g, nodes, dry_run=False):
 
     all_new_edges = []
 
+    _check_not_reaction_graph(g, "remove_and_rewire")
     if g.is_multigraph() or not g.is_directed():
         raise NotImplementedError("Currently only implemented for DiGraph, "
                                   "see simplify_pss.")
@@ -569,9 +600,11 @@ def remove_duplicated_binding_edges(g):
     Parameters
     ----------
     g : networkx.DiGraph or networkx.MultiDiGraph
-        PSS network (each parallel edge of a multigraph is considered separately). Changed in place.
+        PSS interaction network or gene network (not the reaction graph; each parallel edge
+        of a multigraph is considered separately). Changed in place.
     '''
 
+    _check_not_reaction_graph(g, "remove_duplicated_binding_edges")
     is_multi = g.is_multigraph()
 
     def edge_items(u, v):
