@@ -4,9 +4,8 @@ The Cytoscape modules (:mod:`skm_tools.cytoscape_utils`, :mod:`skm_tools.cytosca
 need the optional extras and are not imported here.
 '''
 
-import skm_tools.load_networks
-import skm_tools.pss_utils
-import skm_tools.ckn_utils
+import skm_tools.pss
+import skm_tools.ckn
 import skm_tools.paths
 import skm_tools.neighbors
 import skm_tools.experimental_data

@@ -29,19 +29,20 @@ toolbox is available, and adds functions for the analyses SKM is typically used 
 - **Filtering:** by node type, species, tissue, edge rank or type
 - **Shortest paths** between sources and targets of interest, directed or undirected
 - **Neighbourhoods** of nodes of interest, to any depth
-- **Experimental data:** logFC and p-values as node attributes
 - **Minimum cuts** between sets of nodes
 - **Translation** of Arabidopsis networks to other species
 - **Saving** networks (pickle, JSON, GraphML) and JSON-safe conversion of graphs and paths
 - **Cytoscape automation:** load, style, highlight, extract subnetworks and export images,
-  through `py4cytoscape <https://py4cytoscape.readthedocs.io>`_
+  through `py4cytoscape <https://py4cytoscape.readthedocs.io>`_. Includes - **experimental data overlay** (e.g. heatmaps with expression logFC and p-values as node annotations)
+
 
 .. toctree::
    :maxdepth: 1
    :caption: Manual and guides
 
    installation
-   networks
+   pss
+   ckn
    analysis
    cytoscape
 

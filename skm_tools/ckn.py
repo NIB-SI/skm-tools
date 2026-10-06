@@ -1,11 +1,140 @@
-'''CKN-specific filtering and annotation queries.'''
+'''CKN (Comprehensive Knowledge Network): load, filter, and query annotations.'''
 
-import re
 from collections import defaultdict
+import gzip
+from pathlib import Path
+import re
+from urllib.request import urlretrieve
+
 import networkx as nx
 import pandas as pd
 
+from .skm_download_urls import CKN_EDGE_URL, CKN_NODE_URL
 from .utils import lists_intersect, is_listlike, remove_isolate_nodes
+
+
+# ---------------------------------------------------------------------------
+# Loading
+# ---------------------------------------------------------------------------
+
+def ckn_to_networkx(
+        edge_path=None,
+        node_path=None,
+        add_reciprocal_edges=True,
+        directed=False,
+        create_using=nx.DiGraph
+    ):
+    ''' Load CKN to a networkx directed graph, including node attributes.
+
+    Downloads the CKN files from skm.nib.si if they don't exist yet.
+
+    Parameters
+    ----------
+    edge_path : str or pathlib.Path
+        Path to the edge list file (tab-separated, optionally gzipped);
+        if the file does not exist, it is downloaded from skm.nib.si (gzipped, with a
+        ``.tsv.gz`` suffix).
+    node_path : str or pathlib.Path
+        Path to the node annotation file; downloaded as for `edge_path`.
+    add_reciprocal_edges : bool
+        Add the reverse of undirected edges (``isDirected`` == 0), so directed path
+        searches can use them in both directions (default True). Not meant to be used
+        together with `directed`. For example A -> B (undirected) becomes A -> B and B -> A.
+    directed : bool
+        Remove undirected edges, and the nodes left without edges (default False).
+    create_using : networkx graph class
+        Graph class to create (default ``networkx.DiGraph``; ``networkx.MultiDiGraph``
+        keeps parallel edges).
+
+    Returns
+    -------
+    networkx.DiGraph
+        CKN (or the `create_using` type). Node attributes ``GMM``, ``synonyms`` and
+        ``tissue`` are lists (or None); edges have ``effect``, ``type``, ``rank``,
+        ``species``, ``isDirected``, ``isTFregulation`` and ``interactionSources``.
+    '''
+    edge_path = Path(edge_path)
+    node_path = Path(node_path)
+
+    edge_compressed = False
+    if not edge_path.exists() or (edge_path.suffix == '.gz'):
+        edge_compressed = True
+        if edge_path.suffix != '.gz':
+            edge_path = edge_path.with_suffix(".tsv.gz")
+
+    if not edge_path.exists():
+        print(f"Attempting to download the edge list to {edge_path}.", end=" ")
+        url = CKN_EDGE_URL
+        urlretrieve(url, edge_path)
+        print("Success.")
+
+    node_compressed = False
+    if not node_path.exists() or (node_path.suffix == '.gz'):
+        node_compressed = True
+        if node_path.suffix != '.gz':
+            node_path = node_path.with_suffix(".tsv.gz")
+
+    if not node_path.exists():
+        print(f"Attempting to download the node annotations to {node_path}.", end=" ")
+        urlretrieve(CKN_NODE_URL, node_path)
+        print("Success.")
+
+    if edge_compressed:
+        open_function = gzip.open
+        mode  = "tr"
+    else:
+        open_function = open
+        mode = 'rb'
+
+    with open_function(edge_path, mode) as handle:
+        handle.readline()
+        g = nx.read_edgelist(handle,
+                    delimiter="\t",
+                    create_using=create_using,
+                    data=[
+                        ('effect', str),
+                        ('type', str),
+                        ('rank', int),
+                        ('species', str),
+                        ('isDirected', int),
+                        ('isTFregulation', int),
+                        ('interactionSources', str)
+                    ])
+
+    if node_compressed:
+        node_df = pd.read_csv(node_path, na_values=['', 'N/A'], keep_default_na=False, sep="\t", compression="gzip")
+    else:
+        node_df = pd.read_csv(node_path, na_values=['', 'N/A'], keep_default_na=False, sep="\t")
+
+    node_df.set_index("node_ID", inplace=True)
+
+    clean_list = lambda x, delim: [y.strip() for y in x.split(delim)] if not pd.isna(x) else None
+    for attr, delim in [("GMM", "|"), ("synonyms", "|"), ("tissue", ",")]:
+        node_df[attr] = node_df[attr].apply(clean_list, delim=delim)
+
+    nx.set_node_attributes(g, node_df.to_dict('index'))
+
+    if add_reciprocal_edges:
+        edges_to_add = []
+        for u, v, data in g.edges(data=True):
+            if (data["isDirected"] == 0) and ( not g.has_edge(v, u) ):
+                edges_to_add.append((v, u, data))
+        _ = g.add_edges_from(edges_to_add)
+
+    if directed:
+        to_remove = [(u,v) for u, v, d in g.edges(data=True,) if d["isDirected"]==0]
+        g.remove_edges_from(to_remove)
+
+        # remove isolates resulting from filtering
+        isolates = list(nx.isolates(g))
+        g.remove_nodes_from(isolates)
+
+    return g
+
+
+# ---------------------------------------------------------------------------
+# Filtering and annotations
+# ---------------------------------------------------------------------------
 
 ckn_ranks = [0, 1, 2, 3, 4]
 
@@ -16,7 +145,7 @@ def rank_counts(g):
     Parameters
     ----------
     g : networkx.Graph
-        CKN, e.g. from :func:`skm_tools.load_networks.ckn_to_networkx`.
+        CKN, e.g. from :func:`ckn_to_networkx`.
 
     Returns
     -------
@@ -44,7 +173,7 @@ def filter_ckn_edges(g,
     Parameters
     ----------
     g : networkx.Graph
-        CKN, e.g. from :func:`skm_tools.load_networks.ckn_to_networkx`. Changed in place.
+        CKN, e.g. from :func:`ckn_to_networkx`. Changed in place.
     keep_edge_ranks : int or list of int, optional
         Keep only edges of these ranks (0: best supported, to 4). Edges without a
         ``rank`` attribute are kept.
@@ -101,7 +230,7 @@ def filter_ckn_nodes(g,
     Parameters
     ----------
     g : networkx.Graph
-        CKN, e.g. from :func:`skm_tools.load_networks.ckn_to_networkx`. Changed in place.
+        CKN, e.g. from :func:`ckn_to_networkx`. Changed in place.
     node_types : list of str, optional
         Keep only nodes of these ``node_type`` values (e.g. ``"protein_coding"``, ``"metabolite"``).
     species : list of str, optional
