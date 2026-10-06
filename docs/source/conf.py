@@ -70,8 +70,15 @@ exclude_patterns = []
 html_theme = 'sphinx_rtd_theme'
 
 html_theme_options = {
-    'style_nav_header_background': '#009739'
+    # the SKM web app's green
+    'style_nav_header_background': '#00672c',
 }
+
+html_logo = '../figures/logo.png'
+html_favicon = '../figures/icon.ico'
+
+html_static_path = ['_static']
+html_css_files = ['custom.css']
 
 
 def ensure_pandoc_installed(_):

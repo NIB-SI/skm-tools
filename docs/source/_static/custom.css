@@ -1,0 +1,8 @@
+/* The SKM logo is green and blue: show it on a white panel in the green sidebar header */
+.wy-side-nav-search .wy-dropdown > a img.logo,
+.wy-side-nav-search > a img.logo {
+    background: #ffffff;
+    border-radius: 8px;
+    padding: 8px 12px;
+    max-width: 70%;
+}
