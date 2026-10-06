@@ -7,8 +7,9 @@ All loaders return networkx graphs (:mod:`skm_tools.load_networks`).
 PSS
 ===
 
-PSS is exported in three forms, each as an edge file and a node file (tab-separated,
-with a header; lists are joined with ``;``):
+PSS is exported in three network forms, each as an edge file and a node file (tab-separated,
+with a header). The exports are made by `skm-pss-export <https://github.com/NIB-SI/skm-pss-export>`_,
+which describes the formats and every column in detail.
 
 .. list-table::
    :header-rows: 1
@@ -29,7 +30,7 @@ with a header; lists are joined with ``;``):
      - :func:`~skm_tools.load_networks.pss_interaction_network_to_networkx`
    * - Gene network (per species)
      - The interaction network with functional clusters expanded into the genes of one
-       species (``node_type`` ``gene``).
+       species (``node_type`` ``gene``), e.g. ``ath``, ``stu`` or ``mdo`` (see `Species`_).
      - :func:`~skm_tools.load_networks.pss_gene_network_to_networkx`
 
 All three are :class:`networkx.MultiDiGraph`, as several reactions can link the same two
@@ -47,19 +48,58 @@ both directions.
    pss.nodes["WRKY33[fc00166]"]["display_label"]   # 'WRKY33'
 
 Node attributes include ``node_type`` (the PSS class: ``PlantCoding``, ``Metabolite``,
-``Complex``, ...), ``display_label``, ``short_name``, ``synonyms``, ``pathway``,
-``components`` (for complexes) and ``<species>_homologues``. Empty values are ``None``,
-lists are Python lists, and booleans are ``True``/``False``.
-
-.. note::
-
-   The download URLs of the PSS exports on skm.nib.si are not published yet: the PSS
-   loaders read local files only.
+``Complex``, ..., see the `PSS database schema <https://skm.nib.si/documentation/pss-db#node-labels>`_),
+``display_label``, ``short_name``, ``synonyms``, ``pathway``, ``components`` (for complexes)
+and ``<species>_homologues``. In the files, lists are joined with ``;`` (names can contain
+commas); the loaders return them as Python lists. Empty values are ``None``, and booleans
+are ``True``/``False``.
 
 PSS-specific functions are in :mod:`skm_tools.pss_utils`: filtering by node type or
 species (:func:`~skm_tools.pss_utils.filter_pss_nodes`), merging parallel edges
 (:func:`~skm_tools.pss_utils.simplify_pss`), and removing nodes while keeping their
 upstream and downstream nodes connected (:func:`~skm_tools.pss_utils.remove_and_rewire`).
+
+Species
+-------
+
+PSS is species-independent: its plant nodes are functional clusters, whose genes are listed
+per species in the ``<species>_homologues`` node attributes of the reaction graph and the
+interaction network. A gene network expands the clusters into the genes of one species, and
+only has the reactions whose functional clusters all have genes in that species.
+
+.. list-table::
+   :header-rows: 1
+
+   * - Code
+     - Species
+   * - ``ath``
+     - *Arabidopsis thaliana*
+   * - ``stu``
+     - potato (*Solanum tuberosum*)
+   * - ``sly``
+     - tomato (*Solanum lycopersicum*)
+   * - ``mdo``
+     - apple (*Malus domestica*)
+   * - ``vvi``
+     - grapevine (*Vitis vinifera*)
+   * - ``ppe``
+     - peach (*Prunus persica*)
+   * - ``pavi``
+     - sweet cherry (*Prunus avium*)
+   * - ``pcer``
+     - sour cherry (*Prunus cerasus*)
+   * - ``pdul``
+     - almond (*Prunus dulcis*)
+   * - ``parm``
+     - apricot (*Prunus armeniaca*)
+   * - ``pcox``
+     - pear (*Pyrus communis*)
+   * - ``psib``
+     - Siberian apricot (*Prunus sibirica*)
+
+The genes of the crop species are translated from Arabidopsis by
+`skm-translate <https://github.com/NIB-SI/skm-translate>`_, which combines several orthology
+methods. The same translations can be used to translate CKN with :mod:`skm_tools.translate`.
 
 CKN
 ===
