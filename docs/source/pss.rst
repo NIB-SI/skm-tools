@@ -37,8 +37,7 @@ which describes the formats and every column in detail.
 
 Use the **interaction network** for species-independent analyses, a **gene network** to
 combine PSS with CKN or with experimental data of one species, and the **reaction graph**
-when the reactions themselves matter (their participants and roles). The filtering and
-simplifying functions below work on the interaction network and the gene networks only.
+when the reactions themselves matter (their participants and roles).
 
 Loading
 =======
@@ -106,33 +105,47 @@ and filtered alike.
 ``product``), as an entity can take part in the same reaction twice (e.g. as template and
 stimulator).
 
-Filtering and simplifying
-=========================
+Filtering
+=========
 
-These functions work on the interaction network and the gene networks; they raise a
-``ValueError`` for the reaction graph. The filtering functions change the graph in place
-(make a copy first, ``g.copy()``, to keep the original) and return the reasons nodes were
-removed.
+The filtering functions change the graph in place (make a copy first, ``g.copy()``, to
+keep the original), and return the reasons nodes were removed. They work on whole
+reactions where it matters, so the networks stay consistent: in the reaction graph a
+reaction is a node, and in the interaction network and the gene networks it is the edges
+with its ``reaction_id``. Nodes left without edges are removed too.
 
-:func:`~skm_tools.pss.filter_pss_nodes` keeps only some node types, and, for the
-interaction network, can remove the functional clusters without genes in the given species
-(for a gene network, load the species' gene network instead). Complexes that lose a
-component are removed too (in a gene network, once all genes of a component cluster are
-gone), and so are nodes left without edges:
+:func:`~skm_tools.pss.remove_reactions` removes reactions by id, in all three networks.
+
+:func:`~skm_tools.pss.filter_pss_nodes` keeps only the reactions of some species (interaction
+network and reaction graph): it removes the functional clusters without genes in the
+species, the complexes they are components of, and their reactions (e.g. for a catalysis
+whose enzyme has no genes in the species, also the substrate → product edge). Abstract
+clusters (``PlantAbstract``, without genes) are kept, as metabolites. The result has the
+same reactions as the species' gene network, with functional clusters instead of genes.
+It can also keep only some node types (interaction network and gene networks; in the
+reaction graph, this would leave reactions with missing participants); complexes that lose
+a component are removed too (in a gene network, once all genes of a component cluster are
+gone):
 
 .. code-block:: python
 
-   from skm_tools.pss import filter_pss_nodes
+   from skm_tools.pss import filter_pss_nodes, remove_reactions
 
    reasons = filter_pss_nodes(pss, species=["stu"])
    reasons = filter_pss_nodes(pss, node_types=["PlantCoding", "Complex", "Metabolite"])
    reasons = filter_pss_nodes(pss_stu, node_types=["gene", "Complex", "Metabolite"])
-
-Filtering the interaction network by species keeps the reactions' other edges, while a
-gene network leaves out whole reactions whose clusters lack genes in the species.
+   reasons = remove_reactions(pss, ["rx00001"])
 
 :func:`~skm_tools.pss.remove_deadend_complexes` removes complexes that influence nothing
-(no outgoing edges), which are dead ends in directed analyses.
+(not an input or modifier of any reaction), which are dead ends in directed analyses. In
+the reaction graph, the reactions forming them are removed too; in the interaction network
+and the gene networks, the binding partners' mutual edges from those reactions are kept.
+
+Simplifying
+===========
+
+These work on the interaction network and the gene networks; they raise a ``ValueError``
+for the reaction graph.
 
 :func:`~skm_tools.pss.simplify_pss` merges the parallel edges (one per reaction) between two
 nodes into one edge, and returns a new :class:`networkx.DiGraph`. The merged edge keeps all

@@ -14,6 +14,7 @@ from skm_tools.pss import (
     remove_and_rewire,
     remove_deadend_complexes,
     remove_duplicated_binding_edges,
+    remove_reactions,
     simplify_pss,
 )
 
@@ -455,7 +456,7 @@ def test_filter_pss_nodes_species_on_interaction_network(pss_interaction_network
     filter_pss_nodes(g, species=["ath"], remove_isolates=False)
 
     for _, d in g.nodes(data=True):
-        if d["node_type"] in ("PlantCoding", "PlantNonCoding"):
+        if d.get("functional_cluster_id") and d["node_type"] != "PlantAbstract":
             assert d["ath_homologues"]
 
 
@@ -472,22 +473,66 @@ def test_filter_pss_nodes_gene_network_non_cluster_component_by_id():
     assert "G1" in g
 
 
-def test_filter_pss_nodes_interaction_network_cluster_node_removed():
+def _species_network():
+    """rx1: ENZ (no ath genes) catalyses S -> P; rx2: K (ath genes) catalyses S -> X;
+    rx3: ENZ and K bind to form ENZ|K, which (rx4) activates X; rx5: ABS (abstract,
+    no genes) catalyses X -> Y."""
     g = nx.MultiDiGraph()
-    g.add_node("ETR[fc00075]", node_type="PlantCoding", functional_cluster_id="fc00075")
-    g.add_node("CTR[fc00049]", node_type="PlantCoding", functional_cluster_id="fc00049", ath_homologues=["AT5G03730"])
-    g.add_node("CTR|ETR", node_type="Complex", components=["CTR[fc00049]", "ETR[fc00075]"],
-               component_cluster_ids=["fc00049", "fc00075"])
+    g.add_node("ENZ[fc1]", node_type="PlantCoding", functional_cluster_id="fc1")
+    g.add_node("K[fc2]", node_type="PlantCoding", functional_cluster_id="fc2", ath_homologues=["AT1G01010"])
+    g.add_node("ABS[fc3]", node_type="PlantAbstract", functional_cluster_id="fc3")
+    for n in ("S", "P", "X", "Y"):
+        g.add_node(n, node_type="Metabolite")
+    g.add_node("ENZ|K", node_type="Complex", components=["ENZ[fc1]", "K[fc2]"],
+               component_cluster_ids=["fc1", "fc2"])
+    for u, v, r in [("S", "P", "rx1"), ("ENZ[fc1]", "P", "rx1"), ("ENZ[fc1]", "S", "rx1"),
+                    ("S", "X", "rx2"), ("K[fc2]", "X", "rx2"),
+                    ("ENZ[fc1]", "ENZ|K", "rx3"), ("K[fc2]", "ENZ|K", "rx3"),
+                    ("ENZ|K", "X", "rx4"),
+                    ("X", "Y", "rx5"), ("ABS[fc3]", "Y", "rx5")]:
+        g.add_edge(u, v, key=r, reaction_id=r)
+    return g
 
-    reasons = filter_pss_nodes(g, species=["ath"], remove_isolates=False)
 
-    assert reasons["ETR[fc00075]"] == "species missing"
-    assert reasons["CTR|ETR"] == "complex component removed"
+def test_filter_pss_nodes_species_removes_whole_reactions():
+    g = _species_network()
+
+    reasons = filter_pss_nodes(g, species=["ath"])
+
+    # rx1 and rx3 involve ENZ, which has no ath genes: all their edges go, also S -> P;
+    # rx4 involves ENZ|K, a complex with ENZ as component
+    assert {k for *_, k in g.edges(keys=True)} == {"rx2", "rx5"}
+    assert reasons["ENZ[fc1]"] == "species missing"
+    assert reasons["ENZ|K"] == "complex component removed"
+    assert reasons["P"] == "isolate"
+    # abstract clusters have no genes, and don't decide
+    assert "ABS[fc3]" in g
+
+
+def test_filter_pss_nodes_species_on_merged_edges_keeps_other_reactions():
+    g = simplify_pss(_species_network())
+    g.add_edge("S", "P", reaction_id="rx1,rx2")  # S -> P also through a kept reaction
+
+    filter_pss_nodes(g, species=["ath"])
+
+    assert g["S"]["P"]["reaction_id"] == "rx2"
+
+
+def test_filter_pss_nodes_species_matches_gene_network(
+        pss_interaction_network_edge_path, pss_interaction_network_node_path,
+        pss_gene_network_ath_edge_path, pss_gene_network_ath_node_path):
+    g = pss_interaction_network_to_networkx(pss_interaction_network_edge_path, pss_interaction_network_node_path)
+    gn = pss_gene_network_to_networkx(pss_gene_network_ath_edge_path, pss_gene_network_ath_node_path)
+
+    filter_pss_nodes(g, species=["ath"])
+
+    assert set(g.edges(keys=True)) == {
+        (d["source_entity"], d["target_entity"], k) for _, _, k, d in gn.edges(keys=True, data=True)
+    }
 
 
 @pytest.mark.parametrize("func", [
     lambda g: filter_pss_nodes(g, node_types=["Metabolite"]),
-    remove_deadend_complexes,
     simplify_pss,
     lambda g: remove_and_rewire(simplify_pss(g), []),
     remove_duplicated_binding_edges,
@@ -505,3 +550,89 @@ def test_filter_pss_nodes_species_rejected_on_gene_network(
     with pytest.raises(ValueError, match="one species"):
         filter_pss_nodes(g, species=["stu"])
     assert g.number_of_nodes() == n
+
+
+# ---------------------------------------------------------------------------
+# remove_reactions, and the reaction graph
+# ---------------------------------------------------------------------------
+
+def _reactions(g):
+    return {n for n, d in g.nodes(data=True) if d["node_type"] == "reaction"}
+
+
+def test_remove_reactions_interaction_network():
+    g = _species_network()
+
+    reasons = remove_reactions(g, ["rx1", "rx99"])
+
+    assert {k for *_, k in g.edges(keys=True)} == {"rx2", "rx3", "rx4", "rx5"}
+    assert reasons == {"P": "isolate"}
+
+
+def test_remove_reactions_keeps_isolates_if_asked():
+    g = _species_network()
+    remove_reactions(g, ["rx1"], remove_isolates=False)
+    assert "P" in g
+
+
+def test_remove_reactions_merged_edges_keep_other_reactions():
+    g = nx.DiGraph([("S", "P", {"reaction_id": "rx1,rx2"}), ("P", "X", {"reaction_id": "rx1"})])
+
+    remove_reactions(g, ["rx1"])
+
+    assert list(g.edges(data="reaction_id")) == [("S", "P", "rx2")]
+
+
+def test_remove_reactions_reaction_graph(pss_reaction_graph_edge_path, pss_reaction_graph_node_path):
+    g = pss_reaction_graph_to_networkx(pss_reaction_graph_edge_path, pss_reaction_graph_node_path)
+    participants = set(nx.all_neighbors(g, "rx00001"))
+
+    reasons = remove_reactions(g, ["rx00001"])
+
+    assert "rx00001" not in g and reasons["rx00001"] == "reaction removed"
+    assert all(n in g or reasons[n] == "isolate" for n in participants)
+    assert all(g.degree(n) > 0 for n in g)
+
+
+def test_filter_pss_nodes_species_on_reaction_graph_matches_gene_network(
+        pss_reaction_graph_edge_path, pss_reaction_graph_node_path,
+        pss_gene_network_ath_edge_path, pss_gene_network_ath_node_path):
+    g = pss_reaction_graph_to_networkx(pss_reaction_graph_edge_path, pss_reaction_graph_node_path)
+    gn = pss_gene_network_to_networkx(pss_gene_network_ath_edge_path, pss_gene_network_ath_node_path)
+
+    filter_pss_nodes(g, species=["ath"])
+
+    # translocations without a transporter give no influence edges, so no gene network edges
+    no_edges = {r for r in _reactions(g)
+                if g.nodes[r]["reaction_type"] == "translocation"
+                and not any(k == "transporter" for _, _, k in g.in_edges(r, keys=True))}
+    assert _reactions(g) - no_edges == {k for *_, k in gn.edges(keys=True)}
+
+
+def test_remove_deadend_complexes_interaction_network_keeps_partner_edges():
+    g = nx.MultiDiGraph()
+    g.add_nodes_from(["A", "B"], node_type="PlantCoding")
+    g.add_node("A|B", node_type="Complex")
+    for u, v in [("A", "B"), ("B", "A"), ("A", "A|B"), ("B", "A|B")]:
+        g.add_edge(u, v, key="rx1", reaction_id="rx1")
+
+    assert remove_deadend_complexes(g) == ["A|B"]
+    assert set(g.edges()) == {("A", "B"), ("B", "A")}
+
+
+def test_remove_deadend_complexes_reaction_graph_removes_forming_reactions():
+    g = nx.MultiDiGraph()
+    g.add_nodes_from(["A", "B", "C"], node_type="PlantCoding")
+    g.add_nodes_from(["A|B", "A|B|C"], node_type="Complex")
+    g.add_nodes_from(["rx1", "rx2", "rx3"], node_type="reaction")
+    # rx1: A + B -> A|B; rx2: A|B + C -> A|B|C (a dead end, so A|B becomes one too);
+    # rx3: C -> B
+    for u, v, role in [("A", "rx1", "interactor"), ("B", "rx1", "interactor"), ("rx1", "A|B", "product"),
+                       ("A|B", "rx2", "interactor"), ("C", "rx2", "interactor"), ("rx2", "A|B|C", "product"),
+                       ("C", "rx3", "modifier"), ("rx3", "B", "product")]:
+        g.add_edge(u, v, key=role, role=role)
+
+    removed = remove_deadend_complexes(g)
+
+    assert sorted(removed) == ["A|B", "A|B|C"]
+    assert set(g.nodes()) == {"B", "C", "rx3"}

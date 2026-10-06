@@ -203,78 +203,160 @@ def pss_gene_network_to_networkx(edge_path, node_path, species="ath"):
 # Filtering, simplifying and rewiring
 # ---------------------------------------------------------------------------
 
+def _is_reaction_graph(g):
+    return any(d.get("node_type") == "reaction" for _, d in g.nodes(data=True))
+
+
 def _check_not_reaction_graph(g, func):
     '''The filtering and simplifying functions work on entity -> entity influences, so not on
     the reaction graph (reactions as nodes, no ``interaction`` on the edges).'''
-    if any(d.get("node_type") == "reaction" for _, d in g.nodes(data=True)):
+    if _is_reaction_graph(g):
         raise ValueError(f"{func} works on the PSS interaction network or a gene network, "
                          "not the reaction graph (it has reaction nodes).")
+
+
+def _reaction_ids(edge_data):
+    '''The reaction ids of an edge (merged edges, e.g. from simplify_pss, have several,
+    comma-joined).'''
+    r = edge_data.get("reaction_id")
+    return r.split(",") if r else []
+
+
+def _node_reactions(g, n):
+    '''The reactions node `n` takes part in.'''
+    if _is_reaction_graph(g):
+        return {m for m in nx.all_neighbors(g, n) if g.nodes[m].get("node_type") == "reaction"}
+    edges = list(g.in_edges(n, data=True)) + list(g.out_edges(n, data=True))
+    return {r for _, _, d in edges for r in _reaction_ids(d)}
+
+
+def remove_reactions(g, reaction_ids, remove_isolates=True):
+    '''Remove PSS reactions, in place.
+
+    Works on all three PSS networks: in the reaction graph, the reaction nodes are removed
+    (with their participant edges); in the interaction network and the gene networks, the
+    edges with these ``reaction_id`` values. Merged edges (e.g. from :func:`simplify_pss`)
+    that also come from other reactions are kept, with only those reaction ids.
+
+    Parameters
+    ----------
+    g : networkx.MultiDiGraph or networkx.DiGraph
+        PSS network. Changed in place.
+    reaction_ids : iterable of str
+        Reactions to remove (e.g. ``["rx00001"]``); reactions not in `g` are ignored.
+    remove_isolates : bool
+        Also remove nodes left without edges (default True).
+
+    Returns
+    -------
+    dict
+        Removed node -> reason (``"reaction removed"`` for reaction nodes of the reaction
+        graph, ``"isolate"``).
+
+    Examples
+    --------
+    >>> import networkx as nx
+    >>> g = nx.MultiDiGraph()
+    >>> _ = g.add_edge("A", "B", key="rx1", reaction_id="rx1")
+    >>> _ = g.add_edge("B", "C", key="rx2", reaction_id="rx2")
+    >>> remove_reactions(g, ["rx1"])
+    {'A': 'isolate'}
+    '''
+    reaction_ids = set(reaction_ids)
+    reasons = {}
+
+    if _is_reaction_graph(g):
+        reactions = [r for r in reaction_ids
+                     if r in g and g.nodes[r].get("node_type") == "reaction"]
+        g.remove_nodes_from(reactions)
+        reasons.update({r: "reaction removed" for r in reactions})
+    elif reaction_ids:
+        edges = g.edges(keys=True, data=True) if g.is_multigraph() else g.edges(data=True)
+        to_remove = []
+        for *e, d in edges:
+            ids = _reaction_ids(d)
+            if not reaction_ids.intersection(ids):
+                continue
+            kept = [r for r in ids if r not in reaction_ids]
+            if kept:
+                d["reaction_id"] = ",".join(kept)
+            else:
+                to_remove.append(tuple(e))
+        g.remove_edges_from(to_remove)
+
+    if remove_isolates:
+        reasons.update(remove_isolate_nodes(g))
+
+    return reasons
 
 
 def remove_deadend_complexes(g):
     '''Remove complexes without outgoing edges, in place.
 
-    A complex that influences nothing is a dead end in directed analyses. Repeated
-    (up to five times) since removing one complex can leave another without outgoing edges.
+    A complex that influences nothing (is not an input or modifier of any reaction) is a
+    dead end in directed analyses. Repeated until no dead-end complexes are left, since
+    removing one can leave another without outgoing edges.
+
+    In the interaction network and the gene networks, only the complexes are removed: the
+    binding partners' mutual edges from the same reactions are kept. In the reaction graph,
+    the reactions producing the complexes are removed (see :func:`remove_reactions`), and
+    then the nodes left without edges.
 
     Parameters
     ----------
     g : networkx.DiGraph or networkx.MultiDiGraph
-        PSS interaction network or gene network (not the reaction graph). Changed in place.
+        PSS network. Changed in place.
 
     Returns
     -------
     list
         The removed complexes.
-
-    Raises
-    ------
-    ValueError
-        If `g` is the reaction graph.
     '''
-    _check_not_reaction_graph(g, "remove_deadend_complexes")
+    reaction_graph = _is_reaction_graph(g)
     removed_complexes = []
 
-    # do five times
-    for i in range(5):
-        complexes = [n for n, data in g.nodes(data=True) if data["node_type"] == "Complex"]
-
-        # g is a directed graph, so we can just use "neighbors" to find complexes without out/downstream edges
-        to_remove = []
-        for c in complexes:
-            if len(list(g.neighbors(c))) == 0:
-                to_remove.append(c)
-
-        if len(to_remove) == 0:
+    while True:
+        deadends = [n for n, data in g.nodes(data=True)
+                    if data["node_type"] == "Complex" and g.out_degree(n) == 0]
+        if not deadends:
             break
-
-        g.remove_nodes_from(to_remove)
-        removed_complexes += to_remove
+        if reaction_graph:
+            remove_reactions(g, set().union(*(_node_reactions(g, c) for c in deadends)),
+                             remove_isolates=True)
+        g.remove_nodes_from(deadends)
+        removed_complexes += deadends
 
     print(f"Number of complexes removed: {len(removed_complexes)}")
 
     return removed_complexes
 
 
-
 def filter_pss_nodes(g, node_types=None, species=None, remove_isolates=True):
     '''Remove PSS nodes, in place.
 
-    Complexes with a removed component are removed too (using the ``components`` and
-    ``component_cluster_ids`` node attributes; components not in `g` are ignored).
+    With `species`, the functional clusters without genes in the species, and the complexes
+    they are components of, are removed with their reactions (see :func:`remove_reactions`),
+    as in the species' gene network: applied to the interaction network, the result has the
+    same reactions and edges as the gene network, with clusters instead of genes. With
+    `node_types`, complexes with a removed component are removed too (using the
+    ``components`` and ``component_cluster_ids`` node attributes; components not in `g` are
+    ignored).
 
     Parameters
     ----------
     g : networkx.Graph
-        PSS interaction network or gene network (not the reaction graph). Changed in place.
+        PSS network. Changed in place.
     node_types : list of str, optional
         Keep only nodes of these ``node_type`` values (e.g. ``"PlantCoding"``, ``"Complex"``;
-        in a gene network, genes are ``"gene"``).
+        in a gene network, genes are ``"gene"``). Not for the reaction graph, where it would
+        leave reactions with missing participants.
     species : list of str, optional
-        Interaction network only: remove ``PlantCoding`` and ``PlantNonCoding`` nodes
-        (functional clusters) without genes in any of these species
-        (``<species>_homologues`` attributes, e.g. ``["stu"]``). A gene network is already
-        for one species.
+        Interaction network or reaction graph: remove the functional clusters without genes
+        in any of these species (``<species>_homologues`` attributes, e.g. ``["stu"]``), the
+        complexes with such a cluster among their components (``component_cluster_ids``),
+        and their reactions. Abstract clusters (``PlantAbstract``) have no genes and are
+        kept, as metabolites. Merged edges (e.g. from :func:`simplify_pss`) are kept if
+        they also come from other reactions. A gene network is already for one species.
     remove_isolates : bool
         Also remove nodes left without edges (default True).
 
@@ -282,14 +364,15 @@ def filter_pss_nodes(g, node_types=None, species=None, remove_isolates=True):
     -------
     dict
         Removed node -> reason (``"species missing"``, ``"wrong node type"``,
-        ``"complex component removed"`` or ``"isolate"``).
+        ``"complex component removed"``, ``"reaction removed"`` or ``"isolate"``).
 
     Raises
     ------
     ValueError
-        If `g` is the reaction graph, or `species` is given for a gene network.
+        If `node_types` is given for the reaction graph, or `species` for a gene network.
     '''
-    _check_not_reaction_graph(g, "filter_pss_nodes")
+    if node_types:
+        _check_not_reaction_graph(g, "filter_pss_nodes(node_types=...)")
     if species and any(d.get("node_type") == "gene" for _, d in g.nodes(data=True)):
         raise ValueError("species filtering is for the interaction network; a gene network "
                          "is already for one species (load the gene network of the species "
@@ -300,19 +383,31 @@ def filter_pss_nodes(g, node_types=None, species=None, remove_isolates=True):
     reasons = {}
 
     if species:
-        # nodes that are PlantCoding or PlantNonCoding,
-        # and do not have required homologues
+        # gene clusters (functional clusters with genes: PlantCoding, PlantNonCoding; not
+        # PlantAbstract, which has no genes and doesn't decide, as metabolites) without
+        # genes in any of the species
         homologue_properties = [f"{sp}_homologues" for sp in species]
-        no_species = [
-            n for n, data in g.nodes(data=True) if not
-            (
-                 len([h for h in homologue_properties if data.get(h)])>0
-                 or
-                 not (data['node_type'] in ['PlantCoding', 'PlantNonCoding'])
-            )
+        missing_clusters = {
+            data["functional_cluster_id"]: n for n, data in g.nodes(data=True)
+            if data.get("functional_cluster_id") and data["node_type"] != "PlantAbstract"
+            and not any(data.get(h) for h in homologue_properties)
+        }
+        # complexes with such a cluster among their components (components not in `g` can't
+        # be checked, and are kept)
+        missing_complexes = [
+            n for n, data in g.nodes(data=True)
+            if set(data.get("component_cluster_ids") or []).intersection(missing_clusters)
         ]
-        to_remove.update(no_species)
-        reasons = {**reasons, **{n:"species missing" for n in no_species if not n in reasons}}
+        reasons.update({n: "species missing" for n in missing_clusters.values()})
+        reasons.update({n: "complex component removed" for n in missing_complexes})
+
+        # their reactions are not in the species: as in the species' gene network, remove
+        # the whole reactions (not just these nodes' edges), then the nodes
+        no_species = list(missing_clusters.values()) + missing_complexes
+        removed_reactions = set().union(*(_node_reactions(g, n) for n in no_species))
+        reactions_removed = remove_reactions(g, removed_reactions, remove_isolates=False)
+        reasons.update(reactions_removed)
+        g.remove_nodes_from(no_species)
 
     if node_types:
         # nodes not in keep_types
