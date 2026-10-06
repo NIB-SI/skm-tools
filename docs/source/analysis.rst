@@ -42,22 +42,22 @@ the nodes found.
 Experimental data
 =================
 
-:func:`~skm_tools.experimental_data.overlay_experimental_data` adds logFC and p-values as
-node attributes. It returns a copy, so several experiments can be overlaid on separate
+:func:`~skm_tools.experimental_data.add_experimental_data` adds logFC and p-values as
+node attributes. It returns a copy, so several experiments can be added to separate
 copies of the same network.
 
 .. code-block:: python
 
    import pandas as pd
-   from skm_tools.experimental_data import overlay_experimental_data
+   from skm_tools.experimental_data import add_experimental_data
 
    df = pd.read_csv("deg.tsv", sep="\t", index_col=0)    # indexed by gene id
 
    # CKN nodes are genes: match on the node id
-   ckn_h2o2 = overlay_experimental_data(ckn, df, "logFC", "padj", prefix="H2O2 ")
+   ckn_h2o2 = add_experimental_data(ckn, df, "logFC", "padj", prefix="H2O2 ")
 
    # PSS nodes are functional clusters: match on their genes; the most significant gene is used
-   pss_h2o2 = overlay_experimental_data(pss, df, "logFC", "padj", match_attribute="ath_homologues")
+   pss_h2o2 = add_experimental_data(pss, df, "logFC", "padj", match_attribute="ath_homologues")
 
 .. _mapman:
 
@@ -81,7 +81,23 @@ Minimum cuts
 ============
 
 :func:`~skm_tools.cuts.get_cutset` finds the smallest set of edges that disconnects a set
-of sources from a set of targets. Set a ``capacity`` on every edge first.
+of sources from a set of targets, e.g. the bottlenecks between a signal and a response. It
+needs a :class:`networkx.DiGraph` (for PSS, run :func:`~skm_tools.pss.simplify_pss` first)
+with a ``capacity`` on every edge; a capacity of 1 counts edges. It prints the maximum
+flow, and returns the cut edges:
+
+.. code-block:: python
+
+   import networkx as nx
+   from skm_tools.cuts import get_cutset
+   from skm_tools.pss import simplify_pss
+
+   simple = simplify_pss(pss)
+   nx.set_edge_attributes(simple, 1, "capacity")
+
+   get_cutset(["flg22"], ["WRKY33[fc00166]"], simple)
+   # max_flow = 1
+   # [('MPK3,6[fc00308]', 'WRKY33[fc00166]')]
 
 Saving and serialising
 ======================

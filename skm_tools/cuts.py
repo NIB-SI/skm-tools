@@ -7,8 +7,8 @@ def get_cutset(sources, targets, g):
     '''Minimum edge cut separating `sources` from `targets` (max-flow / min-cut).
 
     The sources are joined to a super-source and the targets to a super-sink with
-    effectively unlimited capacity, and the minimum cut between them is computed with
-    Edmonds-Karp. Prints the maximum flow.
+    unlimited capacity, and the minimum cut between them is computed with Edmonds-Karp.
+    Prints the maximum flow (the total capacity of the cut edges).
 
     Parameters
     ----------
@@ -19,41 +19,41 @@ def get_cutset(sources, targets, g):
     g : networkx.DiGraph
         Graph with a ``capacity`` edge attribute. Edges without it have infinite capacity
         in networkx, so set it on every edge (e.g. ``nx.set_edge_attributes(g, 1, "capacity")``
-        to count edges). `g` is not changed.
+        to count edges). `g` is not changed. Multigraphs are not supported (for PSS, use
+        :func:`skm_tools.pss.simplify_pss` first).
 
     Returns
     -------
     list of tuple
-        The cut edges (u, v), sorted.
+        The cut edges (u, v), sorted. Empty if no target can be reached from the sources.
+
+    Raises
+    ------
+    networkx.NetworkXUnbounded
+        If a path from a source to a target has only edges without a ``capacity``.
+
+    Examples
+    --------
+    >>> import networkx as nx
+    >>> g = nx.DiGraph([("A", "B"), ("A", "C"), ("B", "D"), ("C", "D"), ("D", "E")])
+    >>> nx.set_edge_attributes(g, 1, "capacity")
+    >>> get_cutset(["A"], ["E"], g)
+    max_flow = 1
+    [('D', 'E')]
     '''
-    source_sink_graph = g.copy()
-    
-    source_sink_graph.add_node("source")
-    for node in sources:
-        if source_sink_graph.has_node(node):
-            c = 99999
-    #         c = 0
-    #         for n in [x for x in source_sink_graph.successors(node)]:
-    #             c += source_sink_graph.get_edge_data(node, n)['capacity']        
-            source_sink_graph.add_edge('source', node, capacity=c)
+    sources = {n for n in sources if n in g}
+    targets = {n for n in targets if n in g} - sources
 
-    source_sink_graph.add_node('sink')
-    for node in targets:
-        if source_sink_graph.has_node(node) and not (node in sources):
-            c = 99999
-    #         c = 0
-    #         for n in [x for x in source_sink_graph.predecessors(node)]:
-    #             c += source_sink_graph.get_edge_data(n, node)['capacity']                
-            source_sink_graph.add_edge(node, 'sink', capacity=c)
-    
-    r = nx.flow.edmonds_karp(source_sink_graph, 'source', 'sink')
-    print(f"max_flow = {r.graph['flow_value']}")    
-    
-    cut_value, partition = nx.minimum_cut(source_sink_graph, 'source', 'sink', flow_func=nx.flow.edmonds_karp)
-    reachable, non_reachable = partition
-    
-    cutset = set()
-    for u, nbrs in ((n, source_sink_graph[n]) for n in reachable):
-        cutset.update((u, v) for v in nbrs if v in non_reachable)
+    # super-source and super-sink: new objects, so they can't clash with node names;
+    # edges without a capacity have unlimited capacity
+    source, sink = object(), object()
+    h = g.copy()
+    h.add_edges_from((source, n) for n in sources)
+    h.add_edges_from((n, sink) for n in targets)
+    h.add_nodes_from([source, sink])
 
-    return sorted(cutset)
+    flow, (reachable, non_reachable) = nx.minimum_cut(h, source, sink,
+                                                      flow_func=nx.flow.edmonds_karp)
+    print(f"max_flow = {flow}")
+
+    return sorted((u, v) for u in reachable for v in h[u] if v in non_reachable)

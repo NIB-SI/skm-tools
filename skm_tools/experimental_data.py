@@ -5,13 +5,13 @@ import math
 import pandas as pd
 
 
-def overlay_experimental_data(g, df, logfc_col, pvalue_col=None, cutoff=0.05,
-                              match_attribute=None, prefix=None):
+def add_experimental_data(g, df, logfc_col, pvalue_col=None, cutoff=0.05,
+                          match_attribute=None, prefix=None):
     '''Copy of `g` with experimental values added as node attributes.
 
     Unlike the filter functions (which change the graph in place), this returns a new
-    graph and leaves `g` unchanged: overlays are additive, and it's often useful to keep
-    the unannotated graph, or to overlay several experiments on separate copies.
+    graph and leaves `g` unchanged: it's often useful to keep the unannotated graph, or to
+    add several experiments to separate copies.
 
     Parameters
     ----------
@@ -55,7 +55,7 @@ def overlay_experimental_data(g, df, logfc_col, pvalue_col=None, cutoff=0.05,
     >>> import networkx as nx, pandas as pd
     >>> g = nx.DiGraph([("AT1G01010", "AT1G01020")])
     >>> df = pd.DataFrame({"logFC": [1.5], "padj": [0.01]}, index=["AT1G01010"])
-    >>> h = overlay_experimental_data(g, df, "logFC", "padj")
+    >>> h = add_experimental_data(g, df, "logFC", "padj")
     >>> h.nodes["AT1G01010"]["significant"]
     True
     '''
