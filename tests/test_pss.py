@@ -217,10 +217,12 @@ class TestPSSGeneNetwork:
 
     def test_genes_have_species_and_clusters(self, pss_gene_network_ath_edge_path, pss_gene_network_ath_node_path):
         g = pss_gene_network_to_networkx(pss_gene_network_ath_edge_path, pss_gene_network_ath_node_path)
-        genes = [d for _, d in g.nodes(data=True) if d["node_type"] == "gene"]
+        genes = [d for _, d in g.nodes(data=True) if d.get("species")]
         assert genes
         for d in genes:
             assert d["species"] == "ath"
+            # the class of the gene's functional cluster
+            assert d["node_type"] in ("PlantCoding", "PlantNonCoding")
             assert d["functional_cluster_id"]
             assert "entity" not in d
 
@@ -229,7 +231,7 @@ class TestPSSGeneNetwork:
         multi = [d for _, d in g.nodes(data=True) if len(d["functional_cluster_id"] or []) > 1]
         assert multi
         for _, d in g.nodes(data=True):
-            if d["node_type"] != "gene":
+            if not d.get("species"):  # not a gene
                 continue
             n = len(d["functional_cluster_id"])
             assert isinstance(d["display_label"], str)
@@ -428,25 +430,25 @@ def test_filter_pss_nodes_ignores_components_not_in_network():
 
 def test_filter_pss_nodes_gene_network_keeps_complex_while_cluster_has_genes():
     g = nx.MultiDiGraph()
-    g.add_node("G1", node_type="gene", functional_cluster_id=["fc00075"])
-    g.add_node("G2", node_type="gene", functional_cluster_id=["fc00075", "fc1"])
+    g.add_node("G1", node_type="PlantCoding", species="ath", functional_cluster_id=["fc00075"])
+    g.add_node("G2", node_type="PlantCoding", species="ath", functional_cluster_id=["fc00075", "fc1"])
     g.add_node("ET", node_type="Metabolite")
     # components are interaction-network names: not node ids in a gene network
     g.add_node("ETR|X", node_type="Complex", components=["ETR[fc00075]", "X"],
                component_cluster_ids=["fc00075"])
 
     h = g.copy()
-    filter_pss_nodes(h, node_types=["gene", "Complex", "Metabolite"], remove_isolates=False)
+    filter_pss_nodes(h, node_types=["PlantCoding", "Complex", "Metabolite"], remove_isolates=False)
     assert "ETR|X" in h
 
     h = g.copy()
     h.nodes["G1"]["node_type"] = "drop"
-    filter_pss_nodes(h, node_types=["gene", "Complex", "Metabolite"], remove_isolates=False)
+    filter_pss_nodes(h, node_types=["PlantCoding", "Complex", "Metabolite"], remove_isolates=False)
     assert "ETR|X" in h  # G2 is still in ETR
 
     h = g.copy()
     h.nodes["G1"]["node_type"] = h.nodes["G2"]["node_type"] = "drop"
-    filter_pss_nodes(h, node_types=["gene", "Complex", "Metabolite"], remove_isolates=False)
+    filter_pss_nodes(h, node_types=["PlantCoding", "Complex", "Metabolite"], remove_isolates=False)
     assert "ETR|X" not in h
 
 
@@ -462,12 +464,12 @@ def test_filter_pss_nodes_species_on_interaction_network(pss_interaction_network
 
 def test_filter_pss_nodes_gene_network_non_cluster_component_by_id():
     g = nx.MultiDiGraph()
-    g.add_node("G1", node_type="gene", functional_cluster_id=["fc00075"])
+    g.add_node("G1", node_type="PlantCoding", species="ath", functional_cluster_id=["fc00075"])
     g.add_node("ET", node_type="Metabolite")
     g.add_node("ET|ETR", node_type="Complex", components=["ET", "ETR[fc00075]"],
                component_cluster_ids=["fc00075"])
 
-    reasons = filter_pss_nodes(g, node_types=["gene", "Complex"], remove_isolates=False)
+    reasons = filter_pss_nodes(g, node_types=["PlantCoding", "Complex"], remove_isolates=False)
 
     assert reasons["ET|ETR"] == "complex component removed"
     assert "G1" in g

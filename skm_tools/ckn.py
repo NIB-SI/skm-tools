@@ -48,7 +48,9 @@ def ckn_to_networkx(
     -------
     networkx.DiGraph
         CKN (or the `create_using` type), in the CKN v2.0.1 format: node attributes
-        ``node_type``, ``species``, ``TAIR``, ``display_label``, ``short_name``, ``synonyms``,
+        ``node_type`` (the PSS class, e.g. ``PlantCoding``, ``Metabolite``), ``locus_type``
+        (genes and RNAs: the TAIR locus type, e.g. ``protein_coding``, ``mirna``),
+        ``species``, ``TAIR``, ``display_label``, ``short_name``, ``synonyms``,
         ``description``, ``mapman``, ``note`` and ``tissue``; edge attributes ``interaction``
         (``positive-influence``, ``negative-influence`` or ``unknown-influence``), ``directed``,
         ``rank``, ``effect``, ``type``, ``species``, ``isTFregulation`` and ``interactionSources``.
@@ -58,7 +60,9 @@ def ckn_to_networkx(
     Notes
     -----
     Files in the older CKN v2 format (``node_ID``, ``GMM``, ``full_name``, ``isDirected``, ...)
-    are converted to the v2.0.1 attributes when loaded.
+    are converted to the v2.0.1 attributes when loaded, and so are older node types
+    (``protein_coding``, ``metabolite``, ``biotic``, ...): to the PSS class, with the locus
+    type of genes and RNAs in ``locus_type``.
     '''
     edge_path = Path(edge_path)
     node_path = Path(node_path)
@@ -81,6 +85,8 @@ def ckn_to_networkx(
     node_df = _read_ckn_table(node_path)
     if "node_ID" in node_df.columns:
         node_df, edge_df = _ckn_v2_to_v2_0_1(node_df, edge_df)
+    if "locus_type" not in node_df.columns:
+        node_df = _ckn_pss_node_types(node_df)
 
     for df in (node_df, edge_df):
         for c in _CKN_LIST_COLUMNS.intersection(df.columns):
@@ -120,6 +126,26 @@ _CKN_LIST_COLUMNS = {"synonyms", "mapman", "tissue", "interactionSources"}
 # CKN v2 effect -> v2.0.1 interaction (anything else is an unknown influence)
 _CKN_EFFECT_TO_INTERACTION = {"act": "positive-influence", "inh": "negative-influence"}
 
+# older node_type (TAIR locus types and CKN's own) -> PSS class, as in CKN v2.0.1
+# (skm-ckn scripts/ckn_v2.0.1.py); the locus types of genes and RNAs are kept as locus_type
+_CKN_LOCUS_TYPES = {
+    "protein_coding": "PlantCoding", "transposable_element_gene": "PlantCoding",
+    "pseudogene": "PlantPseudogene",
+    "mirna": "PlantNonCoding", "antisense_long_noncoding_rna": "PlantNonCoding",
+    "pre_trna": "PlantNonCoding", "other_rna": "PlantNonCoding",
+    "small_nuclear_rna": "PlantNonCoding", "small_nucleolar_rna": "PlantNonCoding",
+}
+_CKN_OTHER_TYPES = {
+    "metabolite": "Metabolite", "complex": "Complex", "process": "Process", "abiotic": "ForeignAbiotic",
+}
+# biotic nodes, by id, with the classes of these entities in PSS
+_CKN_BIOTIC = {
+    **dict.fromkeys(["bacteria_flg22", "virus_6K2", "virus_CI", "virus_CP", "virus_HC-Pro",
+                     "virus_NIa-Pro", "virus_NIb", "virus_P1", "virus_P3", "virus_VPg"], "ForeignCoding"),
+    **dict.fromkeys(["bacteria", "virus_PVY"], "ForeignEntity"),
+    **dict.fromkeys(["virus_dsRNA", "virus_vsiRNA", "virus_me-vsiRNA"], "ForeignNonCoding"),
+}
+
 
 def _read_ckn_table(path):
     '''Read a CKN file (optionally gzipped) to a DataFrame of str, with None for empty.'''
@@ -140,6 +166,25 @@ def _ckn_v2_to_v2_0_1(node_df, edge_df):
     edge_df["interaction"] = edge_df["effect"].map(lambda x: _CKN_EFFECT_TO_INTERACTION.get(x, "unknown-influence"))
 
     return node_df, edge_df
+
+
+def _ckn_pss_node_types(node_df):
+    '''Convert older node types (CKN v2, and v2.0.1 before 2026-10-06) to the PSS classes,
+    with the TAIR locus type of genes and RNAs in a new ``locus_type`` column.'''
+    def convert(node_id, node_type):
+        if node_type in _CKN_LOCUS_TYPES:
+            return _CKN_LOCUS_TYPES[node_type], node_type
+        if node_type in _CKN_OTHER_TYPES:
+            return _CKN_OTHER_TYPES[node_type], None
+        if node_type == "biotic" and node_id in _CKN_BIOTIC:
+            return _CKN_BIOTIC[node_id], None
+        raise ValueError(f"No PSS class for CKN node {node_id} (node_type {node_type}).")
+
+    converted = [convert(i, t) for i, t in zip(node_df["id"], node_df["node_type"])]
+    node_df = node_df.copy()
+    node_df["node_type"] = [c for c, _ in converted]
+    node_df.insert(node_df.columns.get_loc("node_type") + 1, "locus_type", [l for _, l in converted])
+    return node_df
 
 
 # ---------------------------------------------------------------------------
@@ -242,7 +287,8 @@ def filter_ckn_nodes(g,
     g : networkx.Graph
         CKN, e.g. from :func:`ckn_to_networkx`. Changed in place.
     node_types : list of str, optional
-        Keep only nodes of these ``node_type`` values (e.g. ``"protein_coding"``, ``"metabolite"``).
+        Keep only nodes of these ``node_type`` values (the PSS classes, e.g. ``"PlantCoding"``,
+        ``"Metabolite"``).
     species : list of str, optional
         Keep only nodes of these species (e.g. ``["ath"]``); nodes without a species
         (e.g. metabolites) are kept.

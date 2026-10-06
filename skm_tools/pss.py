@@ -167,7 +167,8 @@ def pss_gene_network_to_networkx(edge_path, node_path, species="ath"):
     including node attributes.
 
     As the interaction network, but with functional clusters expanded into their genes
-    of one species (nodes with `node_type` == "gene").
+    of one species. Genes have the `node_type` of their cluster (``PlantCoding`` or
+    ``PlantNonCoding``), and are the nodes with a `species`.
     Edges are keyed by `reaction_id`.
 
     A gene can be in several functional clusters, so `short_name`, `pathway` and
@@ -348,8 +349,8 @@ def filter_pss_nodes(g, node_types=None, species=None, remove_isolates=True):
         PSS network. Changed in place.
     node_types : list of str, optional
         Keep only nodes of these ``node_type`` values (e.g. ``"PlantCoding"``, ``"Complex"``;
-        in a gene network, genes are ``"gene"``). Not for the reaction graph, where it would
-        leave reactions with missing participants.
+        in a gene network, genes have their cluster's class, e.g. ``"PlantCoding"``). Not for
+        the reaction graph, where it would leave reactions with missing participants.
     species : list of str, optional
         Interaction network or reaction graph: remove the functional clusters without genes
         in any of these species (``<species>_homologues`` attributes, e.g. ``["stu"]``), the
@@ -373,7 +374,8 @@ def filter_pss_nodes(g, node_types=None, species=None, remove_isolates=True):
     '''
     if node_types:
         _check_not_reaction_graph(g, "filter_pss_nodes(node_types=...)")
-    if species and any(d.get("node_type") == "gene" for _, d in g.nodes(data=True)):
+    # gene networks: genes have a species (functional clusters, in the other networks, don't)
+    if species and any(d.get("species") for _, d in g.nodes(data=True)):
         raise ValueError("species filtering is for the interaction network; a gene network "
                          "is already for one species (load the gene network of the species "
                          "instead).")

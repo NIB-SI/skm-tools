@@ -10,3 +10,16 @@ ACC	positive-influence	ET	True	0	act	other	ath	0	skm:rx00003
 ALA	positive-influence	13-HPOT	True	0	act	other	ath	0	skm:rx00026
 AT1G01020	unknown-influence	AT3G58490	False	3	unk	binding	ath	0	10.1186/1471-2105-10-454|10.3389/fpls.2019.00870
 AT1G01620	unknown-influence	AT1G06040	False	3	unk	binding	ath	0	10.3389/fpls.2019.00870
+GPAphid2	positive-influence	GPAphid2|RANGAP	False	0	act	binding	ath	0	skm:rx00059
+abiotic_waterlogging	positive-influence	ath_o2-deficit	True	0	act	post-translational modification	ath	0	skm:rx00615
+bacteria	positive-influence	bacteria_flg22	True	0	act	transcription factor regulation	ath	1	skm:rx00528
+virus_me-vsiRNA	positive-influence	RISC|virus_vsiRNA	False	0	act	binding	ath	0	skm:rx00593
+AT3G42433	unknown-influence	AT4G31920	False	1	unk	binding	ath	0	10.1186/1471-2105-10-454
+AT2G43010	positive-influence	AT2G44798	True	2	act	transcription factor regulation	ath	1	10.1104/pp.105.072280
+AT2G38325	positive-influence	RISC|MIR390	False	0	act	binding	ath	0	skm:rx00626
+AT2G38325	positive-influence	AT5G49615	True	0	act	transcription factor regulation	ath	1	10.1093/nar/gku1162|skm:rx00111
+AT3G25715	unknown-influence	AT4G37790	False	2	unk	binding	ath	0	10.1073/pnas.1603229113
+MIRF10316	negative-influence	AT3G06900	True	3	inh	small RNA interactions	ath	0	10.1093/nar/gkp818
+AT2G43010	negative-influence	AT4G15258	True	2	inh	transcription factor regulation	ath	1	10.1104/pp.105.072280
+AT5G61420	positive-influence	AT4G03060	True	1	act	transcription factor regulation	ath	1	10.1093/molbev/msv058
+p-Coumaric-acid	positive-influence	ath_phenolics	True	0	act	post-translational modification	ath	0	skm:rx00695

@@ -80,7 +80,8 @@ named ``short_name[functional_cluster_id]`` (e.g. ``WRKY33[fc00166]``), with the
 species in ``<species>_homologues`` attributes (species codes: :doc:`translations`).
 
 **Gene network:** there are no functional clusters; their genes are nodes instead (gene ids,
-``node_type`` ``gene``), and only the reactions whose functional clusters all have genes in
+with ``species`` set, and the ``node_type`` of their cluster: ``PlantCoding`` or
+``PlantNonCoding``), and only the reactions whose functional clusters all have genes in
 the species are included. A gene keeps the clusters it comes from: ``short_name``,
 ``pathway`` and ``functional_cluster_id`` are lists (one entry per cluster, in the same
 order, as a gene can be in several clusters); ``display_label`` is a single string. Other
@@ -133,7 +134,7 @@ gone):
 
    reasons = filter_pss_nodes(pss, species=["stu"])
    reasons = filter_pss_nodes(pss, node_types=["PlantCoding", "Complex", "Metabolite"])
-   reasons = filter_pss_nodes(pss_stu, node_types=["gene", "Complex", "Metabolite"])
+   reasons = filter_pss_nodes(pss_stu, node_types=["PlantCoding", "Complex", "Metabolite"])
    reasons = remove_reactions(pss, ["rx00001"])
 
 :func:`~skm_tools.pss.remove_deadend_complexes` removes complexes that influence nothing

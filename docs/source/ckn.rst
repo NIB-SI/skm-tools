@@ -23,13 +23,19 @@ By default the reverse of every undirected edge is added, so directed path searc
 use undirected edges in both directions (``add_reciprocal_edges=True``); or keep only the
 directed edges with ``directed=True``.
 
-Node attributes include ``node_type``, ``species``, ``TAIR``, ``display_label``,
-``short_name``, ``synonyms``, ``description``, ``mapman`` (see :ref:`mapman`) and ``tissue``.
+Node attributes include ``node_type``, ``locus_type``, ``species``, ``TAIR``,
+``display_label``, ``short_name``, ``synonyms``, ``description``, ``mapman`` (see
+:ref:`mapman`) and ``tissue``. ``node_type`` is the PSS class, as in PSS (``PlantCoding``,
+``PlantNonCoding``, ``Metabolite``, ``Complex``, ``ForeignCoding``, ..., see the
+`PSS database schema <https://skm.nib.si/documentation/pss-db#node-labels>`_), plus
+``PlantPseudogene`` for pseudogenes. For genes and RNAs, ``locus_type`` has the TAIR locus
+type (e.g. ``protein_coding``, ``mirna``, ``transposable_element_gene``).
 Edge attributes include ``interaction`` (``positive-influence``, ``negative-influence`` or
 ``unknown-influence``, as in PSS), ``directed``, ``rank``, ``effect``, ``type`` and
 ``interactionSources``. Lists (e.g. ``synonyms``, ``tissue``) are joined with ``|`` in the
 files and loaded as Python lists; empty values are ``None``. Files in the older CKN v2 format
-are converted to these attributes when loaded.
+are converted to these attributes when loaded, including the older node types
+(e.g. ``protein_coding``, ``metabolite``, ``biotic``) to the PSS classes and ``locus_type``.
 
 Filtering
 =========
@@ -56,7 +62,7 @@ Nodes without a species (metabolites) are kept by the species filter.
 
 .. code-block:: python
 
-   reasons = filter_ckn_nodes(ckn, node_types=["protein_coding", "metabolite"], tissues=["leaf"])
+   reasons = filter_ckn_nodes(ckn, node_types=["PlantCoding", "Metabolite"], tissues=["leaf"])
 
 MapMan annotations
 ==================

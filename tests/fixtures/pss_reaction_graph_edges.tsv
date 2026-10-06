@@ -9,8 +9,8 @@ Cu2+	modifier	rx00005	True	0	rx00005	ACTIVATES	SBO:0000019	endoplasmic reticulum
 rx00005	product	ETR[fc00075]	True	0	rx00005	PRODUCT	SBO:0000011	endoplasmic reticulum	False	protein_active
 ETR[fc00075]	substrate	rx00005	True	0	rx00005	SUBSTRATE	SBO:0000015	endoplasmic reticulum	False	protein
 rx00006	product	CTR|ETR	True	0	rx00006	PRODUCT	SBO:0000011	endoplasmic reticulum	False	complex
-CTR[fc00049]	interactor	rx00006	True	0	rx00006	SUBSTRATE	SBO:0000336	cytoplasm	False	protein_active
 ETR[fc00075]	interactor	rx00006	True	0	rx00006	SUBSTRATE	SBO:0000336	endoplasmic reticulum	False	protein_active
+CTR[fc00049]	interactor	rx00006	True	0	rx00006	SUBSTRATE	SBO:0000336	cytoplasm	False	protein_active
 RTE1[fc00142]	modifier	rx00007	True	0	rx00007	ACTIVATES	SBO:0000019	golgi apparatus	False	protein_active
 rx00007	product	CTR|ETR	True	0	rx00007	PRODUCT	SBO:0000011	endoplasmic reticulum	False	complex_active
 CTR|ETR	substrate	rx00007	True	0	rx00007	SUBSTRATE	SBO:0000015	endoplasmic reticulum	False	complex
