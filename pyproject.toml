@@ -1,41 +1,45 @@
-[tool.poetry]
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
 name = "skm-tools"
-version = "0.1.0"
-description = "Utilities for leveraging SKM resources"
-authors = ["Carissa Bleker <carissa.bleker@nib.si>"]
+authors = [
+  { name="Carissa Bleker", email="carissa.bleker@nib.si" },
+]
+description = "Utilities for leveraging SKM (Stress Knowledge Map) resources"
+keywords = ["systems biology", "plant stress", "knowledge graph", "network analysis"]
+readme = "docs/README.md"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Operating System :: OS Independent",
+]
 license = "GPL-3.0-or-later"
-homepage = "https://github.com/NIB-SI/skm-tools"
-packages = [{ include = "skm_tools" }]
+license-files = ["LICENSE"]
 
-[tool.poetry.dependencies]
-python = "^3.9"
-networkx = ">=2.8"
-pandas = ">=1.4"
+version = "0.1.0"
+requires-python = ">=3.9"
+dependencies = [
+    "networkx>=2.8",
+    "pandas>=1.4",
+]
 
-[tool.poetry.extras]
+[project.optional-dependencies]
 cytoscape = ["py4cytoscape"]
 pdf = ["pypdf", "pdfCropMargins", "reportlab"]
+
+# for development
 docs = ["sphinx", "sphinx-rtd-theme", "sphinx-autoapi", "nbsphinx", "nbsphinx-link", "ipython"]
+test = ["pytest>=7.0"]
 
-[tool.poetry.group.cytoscape.dependencies]
-py4cytoscape = { version = "*", optional = true }
+[tool.setuptools.packages.find]
+include = ["skm_tools*"]
 
-[tool.poetry.group.pdf.dependencies]
-pypdf = { version = "*", optional = true }
-pdfCropMargins = { version = "*", optional = true }
-reportlab = { version = "*", optional = true }
+[tool.setuptools.package-data]
+skm_tools = ["resources/*.xml"]
 
-[tool.poetry.group.docs.dependencies]
-sphinx = { version = "*", optional = true }
-sphinx-rtd-theme = { version = "*", optional = true }
-sphinx-autoapi = { version = "*", optional = true }
-nbsphinx = { version = "*", optional = true }
-nbsphinx-link = { version = "*", optional = true }
-ipython = { version = "*", optional = true }
-
-[tool.poetry.group.dev.dependencies]
-pytest = ">=7.0"
-
-[build-system]
-requires = ["poetry-core"]
-build-backend = "poetry.core.masonry.api"
+[project.urls]
+Homepage = "https://github.com/NIB-SI/skm-tools"
+Documentation = "https://nib-si.github.io/skm-tools"
+Repository = "https://github.com/NIB-SI/skm-tools"
+Issues = "https://github.com/NIB-SI/skm-tools/issues"
