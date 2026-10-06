@@ -3,13 +3,18 @@ import pytest
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
-@pytest.fixture
-def ckn_edge_path():
-    return FIXTURES / "ckn_edges.tsv"
+# CKN tests run on both file formats: v2.0.1, and the older v2 (converted when loaded)
+@pytest.fixture(params=["v2.0.1", "v2"])
+def ckn_version(request):
+    return request.param
 
 @pytest.fixture
-def ckn_node_path():
-    return FIXTURES / "ckn_nodes.tsv.gz"
+def ckn_edge_path(ckn_version):
+    return FIXTURES / f"ckn_{ckn_version}_edges.tsv"
+
+@pytest.fixture
+def ckn_node_path(ckn_version):
+    return FIXTURES / f"ckn_{ckn_version}_nodes.tsv.gz"
 
 @pytest.fixture
 def pss_reaction_graph_edge_path():

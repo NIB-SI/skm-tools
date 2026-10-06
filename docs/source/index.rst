@@ -26,7 +26,7 @@ toolbox is available, and adds functions for the analyses SKM is typically used 
 
 - **Loading:** PSS (reaction graph, interaction network, per-species gene networks) and CKN,
   with node and edge annotations
-- **Filtering:** by node type, species, tissue, edge rank or type
+- **Filtering:** by node type, species, tissue, MapMan bin, edge rank or type
 - **Shortest paths** between sources and targets of interest, directed or undirected
 - **Neighbourhoods** of nodes of interest, to any depth
 - **Minimum cuts** between sets of nodes

@@ -1,16 +1,14 @@
-'''CKN (Comprehensive Knowledge Network): load, filter, and query annotations.'''
+'''CKN (Comprehensive Knowledge Network): load and filter.'''
 
 from collections import defaultdict
-import gzip
 from pathlib import Path
-import re
 from urllib.request import urlretrieve
 
 import networkx as nx
 import pandas as pd
 
 from .skm_download_urls import CKN_EDGE_URL, CKN_NODE_URL
-from .utils import lists_intersect, is_listlike, remove_isolate_nodes
+from .utils import remove_isolate_nodes
 
 
 # ---------------------------------------------------------------------------
@@ -37,7 +35,7 @@ def ckn_to_networkx(
     node_path : str or pathlib.Path
         Path to the node annotation file; downloaded as for `edge_path`.
     add_reciprocal_edges : bool
-        Add the reverse of undirected edges (``isDirected`` == 0), so directed path
+        Add the reverse of undirected edges (``directed`` False), so directed path
         searches can use them in both directions (default True). Not meant to be used
         together with `directed`. For example A -> B (undirected) becomes A -> B and B -> A.
     directed : bool
@@ -49,88 +47,64 @@ def ckn_to_networkx(
     Returns
     -------
     networkx.DiGraph
-        CKN (or the `create_using` type). Empty node and edge attribute values are None.
-        Node attributes ``GMM``, ``synonyms`` and ``tissue`` are lists (or None); edges have ``effect``, ``type``, ``rank``,
-        ``species``, ``isDirected``, ``isTFregulation`` and ``interactionSources``.
+        CKN (or the `create_using` type), in the CKN v2.0.1 format: node attributes
+        ``node_type``, ``species``, ``TAIR``, ``display_label``, ``short_name``, ``synonyms``,
+        ``description``, ``mapman``, ``note`` and ``tissue``; edge attributes ``interaction``
+        (``positive-influence``, ``negative-influence`` or ``unknown-influence``), ``directed``,
+        ``rank``, ``effect``, ``type``, ``species``, ``isTFregulation`` and ``interactionSources``.
+        ``synonyms``, ``mapman``, ``tissue`` and ``interactionSources`` are lists; empty values
+        are None.
+
+    Notes
+    -----
+    Files in the older CKN v2 format (``node_ID``, ``GMM``, ``full_name``, ``isDirected``, ...)
+    are converted to the v2.0.1 attributes when loaded.
     '''
     edge_path = Path(edge_path)
     node_path = Path(node_path)
 
-    edge_compressed = False
-    if not edge_path.exists() or (edge_path.suffix == '.gz'):
-        edge_compressed = True
-        if edge_path.suffix != '.gz':
-            edge_path = edge_path.with_suffix(".tsv.gz")
-
+    if not edge_path.exists() and edge_path.suffix != '.gz':
+        edge_path = edge_path.with_suffix(".tsv.gz")
     if not edge_path.exists():
         print(f"Attempting to download the edge list to {edge_path}.", end=" ")
-        url = CKN_EDGE_URL
-        urlretrieve(url, edge_path)
+        urlretrieve(CKN_EDGE_URL, edge_path)
         print("Success.")
 
-    node_compressed = False
-    if not node_path.exists() or (node_path.suffix == '.gz'):
-        node_compressed = True
-        if node_path.suffix != '.gz':
-            node_path = node_path.with_suffix(".tsv.gz")
-
+    if not node_path.exists() and node_path.suffix != '.gz':
+        node_path = node_path.with_suffix(".tsv.gz")
     if not node_path.exists():
         print(f"Attempting to download the node annotations to {node_path}.", end=" ")
         urlretrieve(CKN_NODE_URL, node_path)
         print("Success.")
 
-    if edge_compressed:
-        open_function = gzip.open
-        mode  = "tr"
-    else:
-        open_function = open
-        mode = 'rb'
+    edge_df = _read_ckn_table(edge_path)
+    node_df = _read_ckn_table(node_path)
+    if "node_ID" in node_df.columns:
+        node_df, edge_df = _ckn_v2_to_v2_0_1(node_df, edge_df)
 
-    with open_function(edge_path, mode) as handle:
-        handle.readline()
-        g = nx.read_edgelist(handle,
-                    delimiter="\t",
-                    create_using=create_using,
-                    data=[
-                        ('effect', str),
-                        ('type', str),
-                        ('rank', int),
-                        ('species', str),
-                        ('isDirected', int),
-                        ('isTFregulation', int),
-                        ('interactionSources', str)
-                    ])
+    for df in (node_df, edge_df):
+        for c in _CKN_LIST_COLUMNS.intersection(df.columns):
+            df[c] = df[c].map(lambda x: [y.strip() for y in x.split("|")] if x is not None else None)
+    for c in ("rank", "isTFregulation"):
+        edge_df[c] = edge_df[c].map(lambda x: int(x) if x is not None else None)
+    edge_df["directed"] = edge_df["directed"].map({"True": True, "False": False})
 
-    # empty values as None, as for the nodes
-    for *_, data in g.edges(data=True):
-        for k, v in data.items():
-            if v == '':
-                data[k] = None
-
-    if node_compressed:
-        node_df = pd.read_csv(node_path, na_values=['', 'N/A'], keep_default_na=False, sep="\t", compression="gzip")
-    else:
-        node_df = pd.read_csv(node_path, na_values=['', 'N/A'], keep_default_na=False, sep="\t")
-
-    node_df.set_index("node_ID", inplace=True)
-    # empty values as None (not NaN), as in the PSS loaders
-    node_df = node_df.astype(object).where(node_df.notna(), None)
-
-    clean_list = lambda x, delim: [y.strip() for y in x.split(delim)] if x is not None else None
-    for attr, delim in [("GMM", "|"), ("synonyms", "|"), ("tissue", ",")]:
-        node_df[attr] = node_df[attr].apply(clean_list, delim=delim)
-
-    nx.set_node_attributes(g, node_df.to_dict('index'))
+    g = create_using()
+    g.add_edges_from(
+        (data.pop("source"), data.pop("target"), data) for data in edge_df.to_dict("records")
+    )
+    node_df = node_df.set_index("id")
+    nx.set_node_attributes(g, node_df[node_df.index.isin(g.nodes)].to_dict('index'))
 
     if add_reciprocal_edges:
         edges_to_add = []
         for u, v, data in g.edges(data=True):
-            if (data["isDirected"] == 0) and ( not g.has_edge(v, u) ):
+            if (not data["directed"]) and (not g.has_edge(v, u)):
                 edges_to_add.append((v, u, data))
         _ = g.add_edges_from(edges_to_add)
 
     if directed:
-        to_remove = [(u,v) for u, v, d in g.edges(data=True,) if d["isDirected"]==0]
+        to_remove = [(u, v) for u, v, d in g.edges(data=True) if not d["directed"]]
         g.remove_edges_from(to_remove)
 
         # remove isolates resulting from filtering
@@ -140,8 +114,36 @@ def ckn_to_networkx(
     return g
 
 
+# CKN files: tab-separated, header, lists joined with "|", empty = no value
+_CKN_LIST_COLUMNS = {"synonyms", "mapman", "tissue", "interactionSources"}
+
+# CKN v2 effect -> v2.0.1 interaction (anything else is an unknown influence)
+_CKN_EFFECT_TO_INTERACTION = {"act": "positive-influence", "inh": "negative-influence"}
+
+
+def _read_ckn_table(path):
+    '''Read a CKN file (optionally gzipped) to a DataFrame of str, with None for empty.'''
+    # "N/A" is the empty species of metabolites in the CKN v2 node file
+    df = pd.read_csv(path, sep="\t", dtype=str, keep_default_na=False, na_values=["", "N/A"])
+    return df.astype(object).where(df.notna(), None)
+
+
+def _ckn_v2_to_v2_0_1(node_df, edge_df):
+    '''Convert CKN v2 tables (AtCKN-v2-2023.06) to the v2.0.1 columns.'''
+    node_df = node_df.rename(columns={"node_ID": "id", "full_name": "description", "GMM": "mapman"})
+    # v2 joined tissues with ","
+    node_df["tissue"] = node_df["tissue"].map(lambda x: x.replace(",", "|") if x is not None else None)
+    node_df["display_label"] = [s if s is not None else i for s, i in zip(node_df["short_name"], node_df["id"])]
+
+    edge_df = edge_df.rename(columns={"isDirected": "directed"})
+    edge_df["directed"] = edge_df["directed"].map({"1": "True", "0": "False"})
+    edge_df["interaction"] = edge_df["effect"].map(lambda x: _CKN_EFFECT_TO_INTERACTION.get(x, "unknown-influence"))
+
+    return node_df, edge_df
+
+
 # ---------------------------------------------------------------------------
-# Filtering and annotations
+# Filtering
 # ---------------------------------------------------------------------------
 
 ckn_ranks = [0, 1, 2, 3, 4]
@@ -342,66 +344,6 @@ def filter_ckn_nodes(g,
     print(f"Removed {og_size - now_size} nodes from network.")
 
     return reasons
-
-
-def get_all_annotations(g, key):
-    '''All values of a list-valued node attribute.
-
-    Parameters
-    ----------
-    g : networkx.Graph
-    key : str
-        Node attribute holding a list (or None), e.g. ``"GMM"`` or ``"tissue"``.
-
-    Returns
-    -------
-    set
-    '''
-    annots = {
-        x
-        for n, d in g.nodes(data=True) if d[key] is not None for x in d[key]
-    }
-    return annots
-
-
-def get_nodes_by_annotation(g, gmm=None, children=True):
-    '''Nodes with any of the given GMM (MapMan) annotations.
-
-    Parameters
-    ----------
-    g : networkx.Graph
-        CKN, with list-valued ``GMM`` node attributes.
-    gmm : list of str
-        GMM bins, e.g. ``["27.3"]`` or ``["27.3_RNA.regulation of transcription"]``.
-    children : bool
-        Also match the sub-bins of each bin (default True), e.g. ``27.3.1``, ``27.3.2``.
-
-    Returns
-    -------
-    list
-        Matching nodes (empty if `gmm` is not a list).
-    '''
-
-    if is_listlike(gmm):
-
-        if children:
-            # automatically extract children annotations
-            all_gmms = get_all_annotations(g, "GMM")
-            gmm = [x.split("_")[0] for x in gmm]
-            gmm = sorted([
-                x for x in all_gmms
-                if any([re.match(fr"^{re.escape(a)}[\.|_]", x) for a in gmm])
-            ])
-            print(
-                f"skm-tools: Also using children annotations. Complete list is now:",
-                end="\n\t")
-            print('\n\t'.join(gmm))
-
-        return [
-            n for n, d in g.nodes(data=True) if lists_intersect(d["GMM"], gmm)
-        ]
-
-    return []
 
 
 def to_graph_tool(g):

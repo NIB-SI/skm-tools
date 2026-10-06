@@ -2,7 +2,7 @@
 Translations
 ============
 
-SKM's networks are built on *Arabidopsis thaliana*. Their genes are translated to crop
+SKM's networks are in majority built on *Arabidopsis thaliana*. Their genes are translated to crop
 species by `skm-translate <https://github.com/NIB-SI/skm-translate>`_, a pipeline that
 combines several orthology methods. The translation files can be downloaded from the
 `SKM downloads page <https://skm.nib.si/downloads>`_, which has the current list of species

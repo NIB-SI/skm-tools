@@ -59,6 +59,24 @@ copies of the same network.
    # PSS nodes are functional clusters: match on their genes; the most significant gene is used
    pss_h2o2 = overlay_experimental_data(pss, df, "logFC", "padj", match_attribute="ath_homologues")
 
+.. _mapman:
+
+MapMan annotations
+==================
+
+PSS and CKN nodes have a ``mapman`` attribute: the MapMan bins (GoMapMan 2, MapMan4) of their
+Arabidopsis genes, each as ``<bin code>_<bin name>``. :func:`~skm_tools.annotations.get_nodes_by_mapman`
+finds the nodes in any of the given bins, by default including their sub-bins; the same bins
+work for both networks.
+
+.. code-block:: python
+
+   from skm_tools.annotations import get_nodes_by_mapman
+
+   # 26.11: External stimuli response.pathogen
+   pss_pathogen = get_nodes_by_mapman(pss, "26.11")
+   ckn_pathogen = get_nodes_by_mapman(ckn, "26.11")
+
 Minimum cuts
 ============
 

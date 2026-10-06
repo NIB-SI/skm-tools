@@ -18,23 +18,28 @@ from .utils import remove_isolate_nodes, unique_item
 # ---------------------------------------------------------------------------
 
 # PSS exports (pss-export): tab-separated, header, no quoting, empty = no value,
-# lists joined with ";" (never split on ",": names such as AHK2,3,4 contain commas).
-_PSS_LIST_SEPARATOR = ";"
+# lists joined with "|" (as in TAIR's files and GAF: names contain "," (AHK2,3,4) and
+# gene symbols ";" (PIP1;3); complex names, which contain "|", are never in a list).
+_PSS_LIST_SEPARATOR = "|"
 _PSS_LIST_COLUMNS = {
     "synonyms",
     "all_pathways",
+    "mapman",
     "external_links",
     "components",
+    "component_cluster_ids",
     "genes",
 }
 # Gene network only: a gene in several functional clusters has one entry per cluster
 # (in the same order) in each of these. Loaded as lists for every node, so the type
 # doesn't depend on the row. (display_label stays a string: it's what to show.)
 _PSS_GENE_CLUSTER_COLUMNS = {
-    "entity",
     "short_name",
     "pathway",
     "functional_cluster_id",
+}
+_PSS_INT_COLUMNS = {
+    "rank",
 }
 _PSS_BOOL_COLUMNS = {
     "directed",
@@ -69,6 +74,8 @@ def _read_pss_table(path, list_columns=()):
             df[c] = df[c].map(_split_pss_list)
         elif c in _PSS_BOOL_COLUMNS:
             df[c] = df[c].map(lambda x: {"True": True, "False": False}[x] if x is not None else None)
+        elif c in _PSS_INT_COLUMNS:
+            df[c] = df[c].map(lambda x: int(x) if x is not None else None)
 
     return df
 
@@ -142,10 +149,13 @@ def pss_gene_network_to_networkx(edge_path, node_path):
     of one species (nodes with `node_type` == "gene").
     Edges are keyed by `reaction_id`.
 
-    A gene can be in several functional clusters, so `entity`, `short_name`, `pathway` and
+    A gene can be in several functional clusters, so `short_name`, `pathway` and
     `functional_cluster_id` are lists for every node (one entry per cluster, in the same order;
-    a single entry for nodes that aren't genes). `components` of complexes are entity ids,
-    i.e. match them against `entity`, not against the gene node ids.
+    a single entry for nodes that aren't genes); `display_label` stays a single string for
+    display. A cluster's name (as in the interaction network, and in the edges'
+    `source_entity` / `target_entity`) is ``short_name[functional_cluster_id]``. Complexes'
+    `components` are interaction-network names; match genes to them through
+    `component_cluster_ids` and `functional_cluster_id`.
 
     Parameters
     ----------
@@ -207,8 +217,8 @@ def remove_deadend_complexes(g):
 def filter_pss_nodes(g, node_types=None, species=None, remove_isolates=True):
     '''Remove PSS nodes, in place.
 
-    Complexes with a removed component are removed too (using the ``components``
-    node attribute; components not in `g` are ignored).
+    Complexes with a removed component are removed too (using the ``components`` and
+    ``component_cluster_ids`` node attributes; components not in `g` are ignored).
 
     Parameters
     ----------
@@ -255,20 +265,22 @@ def filter_pss_nodes(g, node_types=None, species=None, remove_isolates=True):
         reasons = {**reasons, **{n:"wrong node type" for n in wrong_type if not n in reasons}}
 
     # now remove complexes with a component that is in the network, but would no longer be.
-    # Components are node ids (interaction network) or entity ids (gene network, where a
-    # functional cluster is gone only once all its genes are).
-    def entities(nodes):
+    # Components are matched by node id (`components`) and by functional cluster id
+    # (`component_cluster_ids`): in a gene network, clusters are expanded into genes, so a
+    # cluster is gone only once all its genes are.
+    def present(nodes):
         ids = set()
         for n in nodes:
             ids.add(n)
-            ids.update(e for e in (g.nodes[n].get("entity") or []) if e)
+            fc = g.nodes[n].get("functional_cluster_id")
+            ids.update([fc] if isinstance(fc, str) else [x for x in (fc or []) if x])
         return ids
 
-    before = entities(g.nodes())
-    gone = before - entities(n for n in g.nodes() if n not in to_remove)
+    before = present(g.nodes())
+    gone = before - present(n for n in g.nodes() if n not in to_remove)
     complex_component_missing = [
         n for n, data in g.nodes(data=True)
-        if gone.intersection(data.get("components") or [])
+        if gone.intersection((data.get("components") or []) + (data.get("component_cluster_ids") or []))
     ]
     to_remove.update(complex_component_missing)
     reasons = {**reasons, **{n:"complex component removed" for n in complex_component_missing if not n in reasons}}

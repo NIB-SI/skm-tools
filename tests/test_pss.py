@@ -85,17 +85,37 @@ class TestPSSExports:
         g = loader(edge_path, node_path)
         for _, data in g.nodes(data=True):
             for k, v in data.items():
-                if k in ("synonyms", "all_pathways", "external_links", "components") or k.endswith("_homologues"):
+                if k in ("synonyms", "all_pathways", "mapman", "external_links", "components",
+                         "component_cluster_ids") or k.endswith("_homologues"):
                     assert v is None or isinstance(v, list)
 
-    def test_lists_split_on_semicolon_not_comma(self, pss_export):
+    def test_lists_split_on_pipe_only(self, pss_export):
         loader, edge_path, node_path = pss_export
         g = loader(edge_path, node_path)
         synonyms = [s for _, d in g.nodes(data=True) for s in (d["synonyms"] or [])]
         assert len(synonyms) > g.number_of_nodes() / 2
-        assert not any(";" in s for s in synonyms)
+        assert not any("|" in s for s in synonyms)
         # names with commas stay whole (10,11-EHT, AHK2,3,4, ...)
         assert any("," in s for s in synonyms)
+
+    def test_complex_ids_keep_pipe(self, pss_export):
+        loader, edge_path, node_path = pss_export
+        g = loader(edge_path, node_path)
+        assert any("|" in n for n, d in g.nodes(data=True) if d["node_type"] == "Complex")
+
+    def test_rank_zero_on_edges(self, pss_export):
+        loader, edge_path, node_path = pss_export
+        g = loader(edge_path, node_path)
+        assert {d["rank"] for *_, d in g.edges(data=True)} == {0}
+
+    def test_mapman_and_component_cluster_ids(self, pss_export):
+        loader, edge_path, node_path = pss_export
+        g = loader(edge_path, node_path)
+        assert any(d["mapman"] for _, d in g.nodes(data=True))
+        complexes = [d for _, d in g.nodes(data=True) if d["node_type"] == "Complex" and d["component_cluster_ids"]]
+        assert complexes
+        for d in complexes:
+            assert all(c.startswith("fc") for c in d["component_cluster_ids"])
 
     def test_complex_components_are_lists(self, pss_export):
         loader, edge_path, node_path = pss_export
@@ -163,21 +183,25 @@ class TestPSSInteractionNetwork:
 
 class TestPSSGeneNetwork:
 
-    def test_genes_have_species_and_entity(self, pss_gene_network_ath_edge_path, pss_gene_network_ath_node_path):
+    def test_genes_have_species_and_clusters(self, pss_gene_network_ath_edge_path, pss_gene_network_ath_node_path):
         g = pss_gene_network_to_networkx(pss_gene_network_ath_edge_path, pss_gene_network_ath_node_path)
         genes = [d for _, d in g.nodes(data=True) if d["node_type"] == "gene"]
         assert genes
         for d in genes:
             assert d["species"] == "ath"
-            assert d["entity"]
+            assert d["functional_cluster_id"]
+            assert "entity" not in d
 
     def test_cluster_columns_are_aligned_lists(self, pss_gene_network_ath_edge_path, pss_gene_network_ath_node_path):
         g = pss_gene_network_to_networkx(pss_gene_network_ath_edge_path, pss_gene_network_ath_node_path)
         multi = [d for _, d in g.nodes(data=True) if len(d["functional_cluster_id"] or []) > 1]
         assert multi
         for _, d in g.nodes(data=True):
-            n = len(d["entity"])
-            for c in ("short_name", "pathway", "functional_cluster_id"):
+            if d["node_type"] != "gene":
+                continue
+            n = len(d["functional_cluster_id"])
+            assert isinstance(d["display_label"], str)
+            for c in ("short_name", "pathway"):
                 assert d[c] is None or len(d[c]) == n
 
     def test_edges_keyed_by_reaction_id(self, pss_gene_network_ath_edge_path, pss_gene_network_ath_node_path):
@@ -372,10 +396,12 @@ def test_filter_pss_nodes_ignores_components_not_in_network():
 
 def test_filter_pss_nodes_gene_network_keeps_complex_while_cluster_has_genes():
     g = nx.MultiDiGraph()
-    g.add_node("G1", node_type="gene", entity=["ETR[fc00075]"])
-    g.add_node("G2", node_type="gene", entity=["ETR[fc00075]", "OTHER[fc1]"])
-    g.add_node("ET", node_type="Metabolite", entity=["ET"])
-    g.add_node("ETR|X", node_type="Complex", entity=["ETR|X"], components=["ETR[fc00075]"])
+    g.add_node("G1", node_type="gene", functional_cluster_id=["fc00075"])
+    g.add_node("G2", node_type="gene", functional_cluster_id=["fc00075", "fc1"])
+    g.add_node("ET", node_type="Metabolite")
+    # components are interaction-network names: not node ids in a gene network
+    g.add_node("ETR|X", node_type="Complex", components=["ETR[fc00075]", "X"],
+               component_cluster_ids=["fc00075"])
 
     h = g.copy()
     filter_pss_nodes(h, node_types=["gene", "Complex", "Metabolite"], remove_isolates=False)
@@ -400,3 +426,29 @@ def test_filter_pss_nodes_species_on_interaction_network(pss_interaction_network
     for _, d in g.nodes(data=True):
         if d["node_type"] in ("PlantCoding", "PlantNonCoding"):
             assert d["ath_homologues"]
+
+
+def test_filter_pss_nodes_gene_network_non_cluster_component_by_id():
+    g = nx.MultiDiGraph()
+    g.add_node("G1", node_type="gene", functional_cluster_id=["fc00075"])
+    g.add_node("ET", node_type="Metabolite")
+    g.add_node("ET|ETR", node_type="Complex", components=["ET", "ETR[fc00075]"],
+               component_cluster_ids=["fc00075"])
+
+    reasons = filter_pss_nodes(g, node_types=["gene", "Complex"], remove_isolates=False)
+
+    assert reasons["ET|ETR"] == "complex component removed"
+    assert "G1" in g
+
+
+def test_filter_pss_nodes_interaction_network_cluster_node_removed():
+    g = nx.MultiDiGraph()
+    g.add_node("ETR[fc00075]", node_type="PlantCoding", functional_cluster_id="fc00075")
+    g.add_node("CTR[fc00049]", node_type="PlantCoding", functional_cluster_id="fc00049", ath_homologues=["AT5G03730"])
+    g.add_node("CTR|ETR", node_type="Complex", components=["CTR[fc00049]", "ETR[fc00075]"],
+               component_cluster_ids=["fc00049", "fc00075"])
+
+    reasons = filter_pss_nodes(g, species=["ath"], remove_isolates=False)
+
+    assert reasons["ETR[fc00075]"] == "species missing"
+    assert reasons["CTR|ETR"] == "complex component removed"

@@ -11,7 +11,7 @@ Loading
 =======
 
 :func:`~skm_tools.ckn.ckn_to_networkx` loads CKN as a :class:`networkx.DiGraph`,
-downloading the files from `skm.nib.si <https://skm.nib.si>`_ if they don't exist yet:
+downloading the files from `skm.nib.si <https://skm.nib.si>`_ if they don't exist locally:
 
 .. code-block:: python
 
@@ -23,9 +23,13 @@ By default the reverse of every undirected edge is added, so directed path searc
 use undirected edges in both directions (``add_reciprocal_edges=True``); or keep only the
 directed edges with ``directed=True``.
 
-Node attributes include ``node_type``, ``species``, ``TAIR``, ``short_name``, ``synonyms``,
-``full_name``, ``GMM`` (MapMan bins) and ``tissue`` (lists for ``synonyms``, ``GMM`` and
-``tissue``). Edge attributes include ``type``, ``effect`` and ``rank``.
+Node attributes include ``node_type``, ``species``, ``TAIR``, ``display_label``,
+``short_name``, ``synonyms``, ``description``, ``mapman`` (see :ref:`mapman`) and ``tissue``.
+Edge attributes include ``interaction`` (``positive-influence``, ``negative-influence`` or
+``unknown-influence``, as in PSS), ``directed``, ``rank``, ``effect``, ``type`` and
+``interactionSources``. Lists (e.g. ``synonyms``, ``tissue``) are joined with ``|`` in the
+files and loaded as Python lists; empty values are ``None``. Files in the older CKN v2 format
+are converted to these attributes when loaded.
 
 Filtering
 =========
@@ -54,18 +58,10 @@ Nodes without a species (metabolites) are kept by the species filter.
 
    reasons = filter_ckn_nodes(ckn, node_types=["protein_coding", "metabolite"], tissues=["leaf"])
 
-Annotations
-===========
+MapMan annotations
+==================
 
-:func:`~skm_tools.ckn.get_nodes_by_annotation` finds the nodes with any of the given MapMan
-(GMM) bins, by default including their sub-bins; :func:`~skm_tools.ckn.get_all_annotations`
-lists all values of an annotation.
-
-.. code-block:: python
-
-   from skm_tools.ckn import get_nodes_by_annotation
-
-   tfs = get_nodes_by_annotation(ckn, gmm=["27.3"])   # 27.3: regulation of transcription
+To find nodes by MapMan bin, in CKN or PSS, see :ref:`mapman`.
 
 Translation to other species
 ============================

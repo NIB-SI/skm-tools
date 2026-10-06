@@ -1,0 +1,12 @@
+source	interaction	target	directed	rank	effect	type	species	isTFregulation	interactionSources
+12,13-EOT	positive-influence	OPDA	True	0	act	other	ath	0	skm:rx00030
+13-HPOT	positive-influence	12,13-EOT	True	0	act	other	ath	0	skm:rx00029
+3H3PP-CoA	positive-influence	3O3PP-CoA	True	0	act	other	ath	0	skm:rx00534
+3O3PP-CoA	positive-influence	BA-CoA	True	0	act	other	ath	0	skm:rx00535
+9-cis-Violaxanthin	positive-influence	Xanthoxin	True	0	act	other	ath	0	skm:rx00554
+ABA	positive-influence	AT1G01360	True	0	act	post-translational modification	ath	0	skm:rx00474
+ABA	positive-influence	AT2G40330	True	0	act	post-translational modification	ath	0	skm:rx00474
+ACC	positive-influence	ET	True	0	act	other	ath	0	skm:rx00003
+ALA	positive-influence	13-HPOT	True	0	act	other	ath	0	skm:rx00026
+AT1G01020	unknown-influence	AT3G58490	False	3	unk	binding	ath	0	10.1186/1471-2105-10-454|10.3389/fpls.2019.00870
+AT1G01620	unknown-influence	AT1G06040	False	3	unk	binding	ath	0	10.3389/fpls.2019.00870

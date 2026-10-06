@@ -36,9 +36,10 @@ which describes the formats and every column in detail.
        species (``node_type`` ``gene``), for each species in :doc:`translations`.
      - :func:`~skm_tools.pss.pss_gene_network_to_networkx`
 
-All three are :class:`networkx.MultiDiGraph`, as several reactions can link the same two
+All three are loaded as :class:`networkx.MultiDiGraph`, as several reactions can link the same two
 nodes. Mutual influences (``directed`` False, e.g. between binding partners) are listed in
-both directions.
+both directions. Every edge has ``rank`` 0, CKN's rank for curated PSS interactions, so PSS
+and CKN can be combined and filtered alike. The networks are downloaded from `skm.nib.si <https://skm.nib.si>`_ if they don't exist locally:
 
 .. code-block:: python
 
@@ -52,8 +53,11 @@ both directions.
 
 Node attributes include ``node_type`` (the PSS class: ``PlantCoding``, ``Metabolite``,
 ``Complex``, ..., see the `PSS database schema <https://skm.nib.si/documentation/pss-db#node-labels>`_),
-``display_label``, ``short_name``, ``synonyms``, ``pathway``, ``components`` (for complexes)
-and ``<species>_homologues``. In the files, lists are joined with ``;`` and the loaders return them as Python lists. Empty values are ``None``, and booleans
+``display_label``, ``short_name``, ``synonyms``, ``pathway``, ``mapman`` (see
+:ref:`mapman`), ``components`` and ``component_cluster_ids`` (for complexes), and
+``<species>_homologues``. In the files, lists are joined with ``|`` (names can contain ``,``,
+e.g. ``AHK2,3,4``, and gene symbols ``;``, e.g. ``PIP1;3``), and the loaders return them as
+Python lists. Empty values are ``None``, and booleans
 are ``True``/``False``.
 
 Species

@@ -6,6 +6,7 @@ need the optional extras and are not imported here.
 
 import skm_tools.pss
 import skm_tools.ckn
+import skm_tools.annotations
 import skm_tools.paths
 import skm_tools.neighbors
 import skm_tools.experimental_data
