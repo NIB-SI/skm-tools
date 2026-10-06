@@ -51,6 +51,9 @@ and CKN can be combined and filtered alike. The networks are downloaded from `sk
    )
    pss.nodes["WRKY33[fc00166]"]["display_label"]   # 'WRKY33'
 
+To download a gene network, pass the species code too, e.g.
+``pss_gene_network_to_networkx(edge_path, node_path, species="ath")``.
+
 Node attributes include ``node_type`` (the PSS class: ``PlantCoding``, ``Metabolite``,
 ``Complex``, ..., see the `PSS database schema <https://skm.nib.si/documentation/pss-db#node-labels>`_),
 ``display_label``, ``short_name``, ``synonyms``, ``pathway``, ``mapman`` (see

@@ -1,5 +1,8 @@
 """Tests for skm_tools.pss: loaders (small fixtures cut from the export samples) and utils."""
 
+import shutil
+from unittest.mock import patch
+
 import networkx as nx
 import pytest
 
@@ -130,10 +133,37 @@ class TestPSSExports:
         for _, _, data in g.edges(data=True):
             assert isinstance(data["directed"], bool)
 
-    def test_missing_file_raises(self, pss_export, tmp_path):
+    def test_missing_file_downloaded(self, pss_export, tmp_path):
         loader, edge_path, node_path = pss_export
-        with pytest.raises(FileNotFoundError):
-            loader(tmp_path / "missing-edges.tsv", node_path)
+        missing = tmp_path / "missing-edges.tsv"
+        kwargs = {"species": "ath"} if loader is pss_gene_network_to_networkx else {}
+        with patch("skm_tools.pss.urlretrieve",
+                   side_effect=lambda url, path: shutil.copy(edge_path, path)) as mock_dl:
+            g = loader(missing, node_path, **kwargs)
+        mock_dl.assert_called_once()
+        url = mock_dl.call_args[0][0]
+        assert url.startswith("https://skm.nib.si/downloads/pss/public/") and url.endswith("-edges")
+        assert missing.exists()
+        assert sorted(g.edges(keys=True)) == sorted(loader(edge_path, node_path).edges(keys=True))
+
+
+def test_gene_network_download_urls_have_species(
+        pss_gene_network_ath_edge_path, pss_gene_network_ath_node_path, tmp_path):
+    sources = {"edges": pss_gene_network_ath_edge_path, "nodes": pss_gene_network_ath_node_path}
+    with patch("skm_tools.pss.urlretrieve",
+               side_effect=lambda url, path: shutil.copy(sources[url.rsplit("-", 1)[1]], path)) as mock_dl:
+        pss_gene_network_to_networkx(tmp_path / "e.tsv", tmp_path / "n.tsv", species="ath")
+    assert [c[0][0] for c in mock_dl.call_args_list] == [
+        "https://skm.nib.si/downloads/pss/public/gene-network-ath-edges",
+        "https://skm.nib.si/downloads/pss/public/gene-network-ath-nodes",
+    ]
+
+
+def test_gene_network_download_needs_species(pss_gene_network_ath_node_path, tmp_path):
+    with patch("skm_tools.pss.urlretrieve") as mock_dl:
+        with pytest.raises(ValueError, match="species"):
+            pss_gene_network_to_networkx(tmp_path / "e.tsv", pss_gene_network_ath_node_path)
+    mock_dl.assert_not_called()
 
 
 # ---------------------------------------------------------------------------

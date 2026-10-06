@@ -6,10 +6,19 @@ skm-pss-export (https://github.com/NIB-SI/skm-pss-export).
 
 import csv
 from pathlib import Path
+from urllib.request import urlretrieve
 
 import networkx as nx
 import pandas as pd
 
+from .skm_download_urls import (
+    PSS_GENE_NETWORK_EDGE_URL,
+    PSS_GENE_NETWORK_NODE_URL,
+    PSS_INTERACTION_NETWORK_EDGE_URL,
+    PSS_INTERACTION_NETWORK_NODE_URL,
+    PSS_REACTION_GRAPH_EDGE_URL,
+    PSS_REACTION_GRAPH_NODE_URL,
+)
 from .utils import remove_isolate_nodes, unique_item
 
 
@@ -56,13 +65,17 @@ def _split_pss_list(x):
     return [v if v else None for v in x.split(_PSS_LIST_SEPARATOR)]
 
 
-def _read_pss_table(path, list_columns=()):
-    '''Read a PSS export table to a DataFrame of str/list/bool values, with None for empty.'''
+def _download_if_missing(path, url, what):
     path = Path(path)
     if not path.exists():
-        # TODO: download once the new exports are published on skm.nib.si
-        raise FileNotFoundError(f"{path} not found. Download URLs for the PSS network exports "
-                                "are not available yet; pass the path to a local export file.")
+        print(f"Attempting to download the {what} to {path}.", end=" ")
+        urlretrieve(url, path)
+        print("Success.")
+    return path
+
+
+def _read_pss_table(path, list_columns=()):
+    '''Read a PSS export table to a DataFrame of str/list/bool values, with None for empty.'''
 
     df = pd.read_csv(path, sep="\t", dtype=str, keep_default_na=False, na_values=[""],
                      quoting=csv.QUOTE_NONE)
@@ -80,9 +93,13 @@ def _read_pss_table(path, list_columns=()):
     return df
 
 
-def _pss_export_to_networkx(edge_path, node_path, edge_key, node_list_columns=()):
+def _pss_export_to_networkx(edge_path, node_path, edge_url, node_url, edge_key,
+                            node_list_columns=()):
     '''Build a MultiDiGraph from a PSS export: nodes (with attributes) from the node file,
-    edges from the edge file, keyed by the `edge_key` column.'''
+    edges from the edge file, keyed by the `edge_key` column. Missing files are downloaded
+    from the URLs.'''
+    edge_path = _download_if_missing(edge_path, edge_url, "edge list")
+    node_path = _download_if_missing(node_path, node_url, "node annotations")
     edge_df = _read_pss_table(edge_path)
     node_df = _read_pss_table(node_path, node_list_columns)
 
@@ -111,12 +128,14 @@ def pss_reaction_graph_to_networkx(edge_path, node_path):
     ----------
 
     edge_path : str or pathlib.Path
-        Path to the edge file (``pss-reaction-graph-edges-*.tsv``)
+        Path to the edge file (``pss-reaction-graph-edges-*.tsv``);
+        if the file does not exist, it is downloaded from skm.nib.si.
 
     node_path : str or pathlib.Path
-        Path to the node file (``pss-reaction-graph-nodes-*.tsv``)
+        Path to the node file (``pss-reaction-graph-nodes-*.tsv``); downloaded as for `edge_path`.
     '''
-    return _pss_export_to_networkx(edge_path, node_path, edge_key="role")
+    return _pss_export_to_networkx(edge_path, node_path, PSS_REACTION_GRAPH_EDGE_URL,
+                                   PSS_REACTION_GRAPH_NODE_URL, edge_key="role")
 
 
 def pss_interaction_network_to_networkx(edge_path, node_path):
@@ -133,15 +152,17 @@ def pss_interaction_network_to_networkx(edge_path, node_path):
     ----------
 
     edge_path : str or pathlib.Path
-        Path to the edge file (``pss-interaction-network-edges-*.tsv``)
+        Path to the edge file (``pss-interaction-network-edges-*.tsv``);
+        if the file does not exist, it is downloaded from skm.nib.si.
 
     node_path : str or pathlib.Path
-        Path to the node file (``pss-interaction-network-nodes-*.tsv``)
+        Path to the node file (``pss-interaction-network-nodes-*.tsv``); downloaded as for `edge_path`.
     '''
-    return _pss_export_to_networkx(edge_path, node_path, edge_key="reaction_id")
+    return _pss_export_to_networkx(edge_path, node_path, PSS_INTERACTION_NETWORK_EDGE_URL,
+                                   PSS_INTERACTION_NETWORK_NODE_URL, edge_key="reaction_id")
 
 
-def pss_gene_network_to_networkx(edge_path, node_path):
+def pss_gene_network_to_networkx(edge_path, node_path, species=None):
     ''' Load a PSS gene network export (one species) to a networkx directed multigraph,
     including node attributes.
 
@@ -161,13 +182,24 @@ def pss_gene_network_to_networkx(edge_path, node_path):
     ----------
 
     edge_path : str or pathlib.Path
-        Path to the edge file (``pss-gene-network-<species>-edges-*.tsv``)
+        Path to the edge file (``pss-gene-network-<species>-edges-*.tsv``);
+        if the file does not exist, it is downloaded from skm.nib.si.
 
     node_path : str or pathlib.Path
-        Path to the node file (``pss-gene-network-<species>-nodes-*.tsv``)
+        Path to the node file (``pss-gene-network-<species>-nodes-*.tsv``); downloaded as for `edge_path`.
+
+    species : str, optional
+        Species code (e.g. ``"ath"``, see the SKM translations), needed only to download
+        missing files.
     '''
-    return _pss_export_to_networkx(edge_path, node_path, edge_key="reaction_id",
-                                  node_list_columns=_PSS_GENE_CLUSTER_COLUMNS)
+    if species is None and not (Path(edge_path).exists() and Path(node_path).exists()):
+        raise ValueError("Pass `species` (e.g. species=\"ath\") to download a missing gene "
+                         "network file.")
+    return _pss_export_to_networkx(edge_path, node_path,
+                                   PSS_GENE_NETWORK_EDGE_URL.format(species),
+                                   PSS_GENE_NETWORK_NODE_URL.format(species),
+                                   edge_key="reaction_id",
+                                   node_list_columns=_PSS_GENE_CLUSTER_COLUMNS)
 
 
 # ---------------------------------------------------------------------------
