@@ -136,10 +136,9 @@ class TestPSSExports:
     def test_missing_file_downloaded(self, pss_export, tmp_path):
         loader, edge_path, node_path = pss_export
         missing = tmp_path / "missing-edges.tsv"
-        kwargs = {"species": "ath"} if loader is pss_gene_network_to_networkx else {}
         with patch("skm_tools.pss.urlretrieve",
                    side_effect=lambda url, path: shutil.copy(edge_path, path)) as mock_dl:
-            g = loader(missing, node_path, **kwargs)
+            g = loader(missing, node_path)
         mock_dl.assert_called_once()
         url = mock_dl.call_args[0][0]
         assert url.startswith("https://skm.nib.si/downloads/pss/public/") and url.endswith("-edges")
@@ -159,11 +158,12 @@ def test_gene_network_download_urls_have_species(
     ]
 
 
-def test_gene_network_download_needs_species(pss_gene_network_ath_node_path, tmp_path):
+def test_gene_network_download_defaults_to_ath(pss_gene_network_ath_node_path, tmp_path):
     with patch("skm_tools.pss.urlretrieve") as mock_dl:
-        with pytest.raises(ValueError, match="species"):
-            pss_gene_network_to_networkx(tmp_path / "e.tsv", pss_gene_network_ath_node_path)
-    mock_dl.assert_not_called()
+        mock_dl.side_effect = lambda url, path: shutil.copy(
+            pss_gene_network_ath_node_path.with_name("pss_gene_network_ath_edges.tsv"), path)
+        pss_gene_network_to_networkx(tmp_path / "e.tsv", pss_gene_network_ath_node_path)
+    assert mock_dl.call_args[0][0] == "https://skm.nib.si/downloads/pss/public/gene-network-ath-edges"
 
 
 # ---------------------------------------------------------------------------

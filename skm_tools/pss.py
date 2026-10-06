@@ -162,7 +162,7 @@ def pss_interaction_network_to_networkx(edge_path, node_path):
                                    PSS_INTERACTION_NETWORK_NODE_URL, edge_key="reaction_id")
 
 
-def pss_gene_network_to_networkx(edge_path, node_path, species=None):
+def pss_gene_network_to_networkx(edge_path, node_path, species="ath"):
     ''' Load a PSS gene network export (one species) to a networkx directed multigraph,
     including node attributes.
 
@@ -188,13 +188,10 @@ def pss_gene_network_to_networkx(edge_path, node_path, species=None):
     node_path : str or pathlib.Path
         Path to the node file (``pss-gene-network-<species>-nodes-*.tsv``); downloaded as for `edge_path`.
 
-    species : str, optional
-        Species code (e.g. ``"ath"``, see the SKM translations), needed only to download
-        missing files.
+    species : str
+        Species code of the gene network to download if the files are missing
+        (default ``"ath"``, see the SKM translations). Not used for existing files.
     '''
-    if species is None and not (Path(edge_path).exists() and Path(node_path).exists()):
-        raise ValueError("Pass `species` (e.g. species=\"ath\") to download a missing gene "
-                         "network file.")
     return _pss_export_to_networkx(edge_path, node_path,
                                    PSS_GENE_NETWORK_EDGE_URL.format(species),
                                    PSS_GENE_NETWORK_NODE_URL.format(species),
