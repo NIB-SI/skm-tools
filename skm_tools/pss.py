@@ -5,6 +5,7 @@ skm-pss-export (https://github.com/NIB-SI/skm-pss-export).
 '''
 
 import csv
+from collections import Counter
 from pathlib import Path
 from urllib.request import urlretrieve
 
@@ -452,7 +453,7 @@ def filter_pss_nodes(g, node_types=None, species=None, remove_isolates=True):
     return reasons
 
 
-def simplify_pss(g, split_on_attrs=None):
+def simplify_pss(g, split_on_attrs=None, verbose=False):
     '''Merge parallel edges (one per reaction) into one edge per node pair.
 
     Returns a new graph; `g` is unchanged. For the interaction network or a gene network,
@@ -465,14 +466,17 @@ def simplify_pss(g, split_on_attrs=None):
     split_on_attrs : list of str, optional
         Edge attributes (e.g. ``["interaction"]``) that must not be merged away: parallel
         edges are only merged with others that have the same values for all of them.
+    verbose : bool
+        Print every merged edge whose attributes differed, with the value kept. Default:
+        one summary line, with the number of merged edges per differing attribute.
 
     Returns
     -------
     networkx.DiGraph or networkx.MultiDiGraph
         A DiGraph, or a MultiDiGraph with `split_on_attrs` (as edges that differ on them
         stay separate). Merged edges get all ``reaction_id`` values, comma-joined; for every
-        other attribute a single value is kept, with a printed warning when the merged
-        edges had different values (e.g. a positive and a negative influence).
+        other attribute a single value is kept, which is reported when the merged edges had
+        different values (e.g. a positive and a negative influence, see `verbose`).
 
     Notes
     -----
@@ -484,6 +488,7 @@ def simplify_pss(g, split_on_attrs=None):
 
     new_g = nx.MultiDiGraph() if split_on_attrs else nx.DiGraph()
     new_g.add_nodes_from(g.nodes(data=True))
+    differing = Counter()  # attribute -> number of merged edges with differing values
 
     for source in g.nodes():
         edges_to_add = []
@@ -513,11 +518,17 @@ def simplify_pss(g, split_on_attrs=None):
                     for k in sorted(other_attrs):
                         v, m = unique_item([d.get(k) for d in group_edges])
                         if not (m is None):
-                            print(f"{reaction_ids} --> {k}: {m}\n\tKeeping: {v}.")
+                            differing[k] += 1
+                            if verbose:
+                                print(f"{reaction_ids} --> {k}: {m}\n\tKeeping: {v}.")
                         data[k] = v
                     edges_to_add.append((source, target, data))
         new_g.add_edges_from(edges_to_add)
 
+    if differing and not verbose:
+        print("Merged edges with differing values (one value kept): "
+              + ", ".join(f"{k} ({n})" for k, n in differing.most_common())
+              + ". See verbose=True for details.")
 
     return new_g
 

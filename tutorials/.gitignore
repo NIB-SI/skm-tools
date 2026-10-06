@@ -1,0 +1,5 @@
+# downloaded networks, and the tutorials' results
+data/
+output/
+# copies of the tutorials without the Cytoscape cells, run in CI
+.ci-*.ipynb

@@ -35,6 +35,8 @@ Where ``<optional-dependencies>`` is a comma-separated list of:
   `Cytoscape <https://cytoscape.org>`_
 * ``pdf``: batch export of Cytoscape networks to PDF (:mod:`skm_tools.cytoscape_pdf_utils`),
   requires pypdf, pdfCropMargins and reportlab
+* ``tutorials``: to run the :doc:`tutorials <tutorials/tutorial-pss>` (matplotlib,
+  py4cytoscape and a Jupyter kernel)
 * ``docs``: to build this documentation
 * ``test``: to run the tests (pytest)
 

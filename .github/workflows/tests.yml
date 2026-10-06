@@ -1,0 +1,62 @@
+name: Tests
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'pyproject.toml'
+      - 'skm_tools/**'
+      - 'tests/**'
+      - 'tutorials/**'
+      - '.github/workflows/tests.yml'
+      - '.github/scripts/**'
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install skm-tools with the test and cytoscape extras
+        run: pip install .[test,cytoscape]
+
+      - name: Run the tests
+        run: python -m pytest tests
+
+  tutorials:
+    # The tutorials download the networks from skm.nib.si, and are run without their
+    # Cytoscape cells (marked "# ci-skip: ...").
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        notebook: [tutorial-pss, tutorial-ckn, tutorial-heatmaps]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install skm-tools with the tutorials extra
+        run: pip install .[tutorials] nbclient nbformat
+
+      - name: Strip the ci-skip cells (e.g. cells that need a running Cytoscape)
+        run: >
+          python .github/scripts/strip_ci_skip_cells.py
+          tutorials/${{ matrix.notebook }}.ipynb
+          tutorials/.ci-${{ matrix.notebook }}.ipynb
+
+      - name: Run ${{ matrix.notebook }}
+        run: jupyter execute --kernel_name=python3 --timeout=900 .ci-${{ matrix.notebook }}.ipynb
+        working-directory: tutorials

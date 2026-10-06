@@ -1036,7 +1036,7 @@ def chart_column(df, columns, colours, chart="barchart", value_range=None, label
 # Export
 # ---------------------------------------------------------------------------
 
-def export_network(network, filename, format="PDF", **kwargs):
+def export_network(network, filename, format="PDF", wait=1.0, **kwargs):
     '''Export a network view as an image, fitted to the content and with nothing selected.
 
     Parameters
@@ -1048,6 +1048,10 @@ def export_network(network, filename, format="PDF", **kwargs):
     format : str
         ``"PDF"`` (default), ``"PNG"``, ``"SVG"``, ...: see
         ``py4cytoscape.network_views.export_image``.
+    wait : float
+        Seconds to wait before exporting (default 1). Cytoscape applies style changes (e.g.
+        a new style, node images or charts) in the background, and an image exported
+        right after them can miss some of them.
     **kwargs
         Passed on to ``py4cytoscape.network_views.export_image``, e.g. ``zoom=300`` or
         ``transparent_background=True`` for PNG.
@@ -1057,6 +1061,7 @@ def export_network(network, filename, format="PDF", **kwargs):
     # Reported bug: CSD-979
     p4c.network_views.fit_content(network=network)
     p4c.network_selection.clear_selection(type='both', network=network)
+    time.sleep(wait)
 
     p4c.network_views.export_image(
         filename=str(Path(filename).absolute()),

@@ -27,6 +27,8 @@ dependencies = [
 [project.optional-dependencies]
 cytoscape = ["py4cytoscape"]
 pdf = ["pypdf", "pdfCropMargins", "reportlab"]
+# running the tutorials (tutorials/)
+tutorials = ["matplotlib", "py4cytoscape", "ipykernel"]
 
 # for development
 docs = ["sphinx", "sphinx-rtd-theme", "sphinx-autoapi", "nbsphinx", "nbsphinx-link", "ipython"]

@@ -183,7 +183,9 @@ def _ckn_pss_node_types(node_df):
     converted = [convert(i, t) for i, t in zip(node_df["id"], node_df["node_type"])]
     node_df = node_df.copy()
     node_df["node_type"] = [c for c, _ in converted]
-    node_df.insert(node_df.columns.get_loc("node_type") + 1, "locus_type", [l for _, l in converted])
+    # object dtype, so None stays None (pandas 3 would make a str column with NaN)
+    node_df.insert(node_df.columns.get_loc("node_type") + 1, "locus_type",
+                   pd.Series([l for _, l in converted], index=node_df.index, dtype=object))
     return node_df
 
 

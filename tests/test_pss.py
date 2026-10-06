@@ -638,3 +638,34 @@ def test_remove_deadend_complexes_reaction_graph_removes_forming_reactions():
 
     assert sorted(removed) == ["A|B", "A|B|C"]
     assert set(g.nodes()) == {"B", "C", "rx3"}
+
+
+def _conflicting_edges():
+    g = nx.MultiDiGraph()
+    g.add_edge("A", "B", key="rx1", reaction_id="rx1", interaction="positive-influence", reaction_type="catalysis")
+    g.add_edge("A", "B", key="rx2", reaction_id="rx2", interaction="negative-influence", reaction_type="catalysis")
+    g.add_edge("B", "C", key="rx3", reaction_id="rx3", interaction="positive-influence", reaction_type="binding")
+    g.add_edge("B", "C", key="rx4", reaction_id="rx4", interaction="negative-influence", reaction_type="catalysis")
+    return g
+
+
+def test_simplify_pss_reports_a_summary(capsys):
+    simplify_pss(_conflicting_edges())
+    out = capsys.readouterr().out.strip().splitlines()
+    assert len(out) == 1
+    assert "interaction (2)" in out[0] and "reaction_type (1)" in out[0]
+
+
+def test_simplify_pss_verbose_reports_every_edge(capsys):
+    simplify_pss(_conflicting_edges(), verbose=True)
+    out = capsys.readouterr().out
+    assert "rx1,rx2 --> interaction" in out and "rx3,rx4 --> reaction_type" in out
+    assert "See verbose=True" not in out
+
+
+def test_simplify_pss_no_report_without_differences(capsys):
+    g = nx.MultiDiGraph()
+    g.add_edge("A", "B", key="rx1", reaction_id="rx1", interaction="positive-influence")
+    g.add_edge("A", "B", key="rx2", reaction_id="rx2", interaction="positive-influence")
+    simplify_pss(g)
+    assert capsys.readouterr().out == ""

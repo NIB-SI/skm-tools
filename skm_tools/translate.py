@@ -17,6 +17,7 @@ def load_translation_file(species_code, translation_path):
         SKM species code of the translation (e.g. ``"parm"`` for apricot).
     translation_path : str or pathlib.Path
         Local file; downloaded here if it doesn't exist (so it can be reused offline).
+        The download is gzipped, so give it a ``.tsv.gz`` name (e.g. ``"stu.tsv.gz"``).
 
     Returns
     -------

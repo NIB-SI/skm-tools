@@ -50,6 +50,14 @@ toolbox is available, and adds functions for the analyses SKM is typically used 
    cytoscape
    dinar
 
+.. toctree::
+   :maxdepth: 1
+   :caption: Tutorials
+
+   tutorials/tutorial-pss
+   tutorials/tutorial-ckn
+   tutorials/tutorial-heatmaps
+
 Citation
 ========
 

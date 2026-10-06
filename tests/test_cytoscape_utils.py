@@ -245,7 +245,9 @@ def test_export_collection(p4c, tmp_path):
     p4c.get_collection_networks.return_value = [12, 11]
     p4c.get_network_name.side_effect = lambda suid: {11: "JA - Heat", 12: "SA/Heat"}[suid]
 
-    files = cu.export_collection(11, tmp_path / "out", zoom=300)
+    with patch.object(cu.time, "sleep") as sleep:
+        files = cu.export_collection(11, tmp_path / "out", zoom=300)
+    assert sleep.call_count == 2  # waits for Cytoscape before each export
 
     assert [f.name for f in files] == ["JA_Heat_11.png", "SA_Heat_12.png"]
     call = p4c.network_views.export_image.call_args.kwargs
