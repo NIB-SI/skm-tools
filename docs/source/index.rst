@@ -43,6 +43,7 @@ toolbox is available, and adds functions for the analyses SKM is typically used 
    installation
    pss
    ckn
+   translations
    analysis
    cytoscape
 

@@ -3,7 +3,9 @@ PSS
 ===
 
 The Plant Stress Signalling model (PSS) is a curated, mechanistic model of plant stress
-signalling. Everything here is in :mod:`skm_tools.pss`.
+signalling; see the `PSS documentation <https://skm.nib.si/documentation/pss-explore>`_ on
+the SKM website for what it contains and how it is built. Everything here is in
+:mod:`skm_tools.pss`.
 
 Loading
 =======
@@ -31,7 +33,7 @@ which describes the formats and every column in detail.
      - :func:`~skm_tools.pss.pss_interaction_network_to_networkx`
    * - Gene network (per species)
      - The interaction network with functional clusters expanded into the genes of one
-       species (``node_type`` ``gene``), for each species listed under `Species`_.
+       species (``node_type`` ``gene``), for each species in :doc:`translations`.
      - :func:`~skm_tools.pss.pss_gene_network_to_networkx`
 
 All three are :class:`networkx.MultiDiGraph`, as several reactions can link the same two
@@ -57,59 +59,12 @@ are ``True``/``False``.
 Species
 =======
 
-PSS is species-independent: its plant nodes are functional clusters, whose genes are listed
-per species in the ``<species>_homologues`` node attributes of the reaction graph and the
-interaction network. A gene network expands the clusters into the genes of one species, and
-only has the reactions whose functional clusters all have genes in that species. Gene networks
-are available for Arabidopsis and for each species with translations on the
-`SKM downloads page <https://skm.nib.si/downloads>`_:
-
-.. list-table::
-   :header-rows: 1
-
-   * - Code
-     - Species
-     - Common name
-   * - ``ath``
-     - *Arabidopsis thaliana*
-     - thale cress
-   * - ``mdo``
-     - *Malus domestica*
-     - apple
-   * - ``pdul``
-     - *Prunus amygdalus* syn. *Prunus dulcis*
-     - almond
-   * - ``parm``
-     - *Prunus armeniaca*
-     - apricot
-   * - ``pavi``
-     - *Prunus avium*
-     - wild cherry
-   * - ``pcer``
-     - *Prunus cerasifera*
-     - cherry plum
-   * - ``ppe``
-     - *Prunus persica*
-     - peach
-   * - ``psib``
-     - *Prunus sibirica*
-     - siberian apricot
-   * - ``pcox``
-     - *Pyrus communis*
-     - pear
-   * - ``sly``
-     - *Solanum lycopersicum*
-     - tomato
-   * - ``stu``
-     - *Solanum tuberosum*
-     - potato
-   * - ``vvi``
-     - *Vitis vinifera*
-     - grapevine
-
-The genes of the crop species are translated from Arabidopsis by
-`skm-translate <https://github.com/NIB-SI/skm-translate>`_, which combines several orthology
-methods. The same translations can be used to translate CKN with :mod:`skm_tools.translate`.
+PSS is species-independent: its plant nodes are `functional clusters
+<https://skm.nib.si/documentation/pss-explore#FC>`_, whose genes are listed per species in the
+``<species>_homologues`` node attributes of the reaction graph and the interaction network. A
+gene network expands the clusters into the genes of one species, and only has the reactions
+whose functional clusters all have genes in that species. For the species and their codes,
+see :doc:`translations`.
 
 Filtering and simplifying
 =========================

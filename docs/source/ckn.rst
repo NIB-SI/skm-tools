@@ -3,8 +3,9 @@ CKN
 ===
 
 The Comprehensive Knowledge Network (CKN) is a network of molecular interactions in
-*Arabidopsis thaliana*, mostly from high-throughput experiments. Everything here is in
-:mod:`skm_tools.ckn`.
+*Arabidopsis thaliana*, mostly from high-throughput experiments; see the
+`CKN documentation <https://skm.nib.si/documentation/ckn-explore>`_ on the SKM website for its
+sources and interaction types. Everything here is in :mod:`skm_tools.ckn`.
 
 Loading
 =======
@@ -22,14 +23,9 @@ By default the reverse of every undirected edge is added, so directed path searc
 use undirected edges in both directions (``add_reciprocal_edges=True``); or keep only the
 directed edges with ``directed=True``.
 
-Node attributes include ``node_type`` (``protein_coding``, ``mirna``,
-``transposable_element_gene``, ``metabolite``, ``complex``, ...), ``species`` (``ath``,
-``foreign`` or ``ath/foreign``; missing for metabolites), ``TAIR``, ``short_name``,
-``synonyms``, ``full_name``, ``GMM`` (MapMan bins) and ``tissue`` (``leaf``, ``flower``,
-``stem``, ``root``, ``seed`` or ``not assigned``); ``synonyms``, ``GMM`` and ``tissue`` are
-lists. Edge attributes include ``type`` (``binding``, ``small RNA interactions``,
-``transcription factor regulation``, ``post-translational modification``, ``other``),
-``effect`` and ``rank``.
+Node attributes include ``node_type``, ``species``, ``TAIR``, ``short_name``, ``synonyms``,
+``full_name``, ``GMM`` (MapMan bins) and ``tissue`` (lists for ``synonyms``, ``GMM`` and
+``tissue``). Edge attributes include ``type``, ``effect`` and ``rank``.
 
 Filtering
 =========
@@ -37,8 +33,9 @@ Filtering
 The filtering functions change the graph in place (make a copy first, ``g.copy()``, to keep
 the original), and remove nodes left without edges.
 
-:func:`~skm_tools.ckn.filter_ckn_edges` keeps only edges of some ranks (0, the best
-supported, to 4) and/or types, or those for which your own function returns True.
+:func:`~skm_tools.ckn.filter_ckn_edges` keeps only edges of some
+`ranks <https://skm.nib.si/documentation/ckn-explore#ranks>`_ (from 0, curated in PSS, to 4,
+purely predicted) and/or types, or those for which your own function returns True.
 :func:`~skm_tools.ckn.rank_counts` counts the edges of each rank.
 
 .. code-block:: python
@@ -73,13 +70,4 @@ lists all values of an annotation.
 Translation to other species
 ============================
 
-:mod:`skm_tools.translate` translates the Arabidopsis genes of CKN to another species,
-using the `skm-translate <https://github.com/NIB-SI/skm-translate>`_ translation files from the
-`SKM downloads page <https://skm.nib.si/downloads>`_ (see :doc:`pss` for the species codes):
-
-.. code-block:: python
-
-   from skm_tools.translate import load_translation_file, integrate_translation_ckn
-
-   translations = load_translation_file("parm", "translations-parm.tsv")
-   ckn_apricot = integrate_translation_ckn(ckn, translations, t_target_col="apricot")
+To translate CKN's Arabidopsis genes to another species, see :doc:`translations`.
