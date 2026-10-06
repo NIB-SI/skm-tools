@@ -6,3 +6,9 @@
     padding: 8px 12px;
     max-width: 70%;
 }
+
+/* sphinx-rtd-theme doesn't wrap table cells; wrap long text instead of scrolling sideways */
+.wy-table-responsive table td,
+.wy-table-responsive table th {
+    white-space: normal;
+}
