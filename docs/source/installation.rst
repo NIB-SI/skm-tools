@@ -36,6 +36,7 @@ Where ``<optional-dependencies>`` is a comma-separated list of:
 * ``pdf``: batch export of Cytoscape networks to PDF (:mod:`skm_tools.cytoscape_pdf_utils`),
   requires pypdf, pdfCropMargins and reportlab
 * ``docs``: to build this documentation
+* ``test``: to run the tests (pytest)
 
 For example:
 
@@ -51,7 +52,9 @@ Tests
 
 .. code-block:: bash
 
-   pip install pytest
+   git clone https://github.com/NIB-SI/skm-tools.git
+   cd skm-tools
+   pip install ".[test]"
    pytest
 
 See https://github.com/NIB-SI/skm-tools/tree/main/tests. The Cytoscape tests mock
