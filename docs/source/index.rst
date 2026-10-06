@@ -34,6 +34,8 @@ toolbox is available, and adds functions for the analyses SKM is typically used 
 - **Saving** networks (pickle, JSON, GraphML) and JSON-safe conversion of graphs and paths
 - **Cytoscape automation:** load, style, highlight, extract subnetworks and export images,
   through `py4cytoscape <https://py4cytoscape.readthedocs.io>`_. Includes - **experimental data overlay** (e.g. heatmaps with expression logFC and p-values as node annotations)
+- **DiNAR export:** networks as `DiNAR <https://github.com/NIB-SI/DiNAR>`_ custom networks,
+  to show expression data of several conditions on them
 
 
 .. toctree::
@@ -46,6 +48,7 @@ toolbox is available, and adds functions for the analyses SKM is typically used 
    translations
    analysis
    cytoscape
+   dinar
 
 Citation
 ========

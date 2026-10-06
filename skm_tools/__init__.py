@@ -14,3 +14,4 @@ import skm_tools.cuts
 import skm_tools.translate
 import skm_tools.serialize
 import skm_tools.persistence
+import skm_tools.dinar

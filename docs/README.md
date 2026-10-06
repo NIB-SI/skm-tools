@@ -19,7 +19,7 @@ SKM-tools (https://github.com/NIB-SI/skm-tools) is a collection of Python script
 8) Interoperability with the DiNAR application, allowing integration and visualisation of multiple condition high-throughput data in a knowledge graph context.
 
 ## DiNAR & SKM
-Instructions for using [DiNAR](https://github.com/NIB-SI/DiNAR/) (Differential Network Analysis in R) with SKM are here: [DiNAR & SKM](https://github.com/NIB-SI/skm-tools/tree/main/DiNAR.md)
+Instructions for using [DiNAR](https://github.com/NIB-SI/DiNAR/) (Differential Network Analysis in R) with SKM are here: [DiNAR](https://nib-si.github.io/skm-tools/dinar.html)
 
 ## Case studies from the publication
 
