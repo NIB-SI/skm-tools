@@ -30,7 +30,7 @@ which describes the formats and every column in detail.
      - :func:`~skm_tools.load_networks.pss_interaction_network_to_networkx`
    * - Gene network (per species)
      - The interaction network with functional clusters expanded into the genes of one
-       species (``node_type`` ``gene``), e.g. ``ath``, ``stu`` or ``mdo`` (see `Species`_).
+       species (``node_type`` ``gene``), for each species listed under `Species`_.
      - :func:`~skm_tools.load_networks.pss_gene_network_to_networkx`
 
 All three are :class:`networkx.MultiDiGraph`, as several reactions can link the same two
@@ -50,8 +50,7 @@ both directions.
 Node attributes include ``node_type`` (the PSS class: ``PlantCoding``, ``Metabolite``,
 ``Complex``, ..., see the `PSS database schema <https://skm.nib.si/documentation/pss-db#node-labels>`_),
 ``display_label``, ``short_name``, ``synonyms``, ``pathway``, ``components`` (for complexes)
-and ``<species>_homologues``. In the files, lists are joined with ``;`` (names can contain
-commas); the loaders return them as Python lists. Empty values are ``None``, and booleans
+and ``<species>_homologues``. In the files, lists are joined with ``;`` and the loaders return them as Python lists. Empty values are ``None``, and booleans
 are ``True``/``False``.
 
 PSS-specific functions are in :mod:`skm_tools.pss_utils`: filtering by node type or
@@ -65,37 +64,52 @@ Species
 PSS is species-independent: its plant nodes are functional clusters, whose genes are listed
 per species in the ``<species>_homologues`` node attributes of the reaction graph and the
 interaction network. A gene network expands the clusters into the genes of one species, and
-only has the reactions whose functional clusters all have genes in that species.
+only has the reactions whose functional clusters all have genes in that species. Gene networks
+are available for Arabidopsis and for each species with translations on the
+`SKM downloads page <https://skm.nib.si/downloads>`_:
 
 .. list-table::
    :header-rows: 1
 
    * - Code
      - Species
+     - Common name
    * - ``ath``
      - *Arabidopsis thaliana*
-   * - ``stu``
-     - potato (*Solanum tuberosum*)
-   * - ``sly``
-     - tomato (*Solanum lycopersicum*)
+     - thale cress
    * - ``mdo``
-     - apple (*Malus domestica*)
-   * - ``vvi``
-     - grapevine (*Vitis vinifera*)
-   * - ``ppe``
-     - peach (*Prunus persica*)
-   * - ``pavi``
-     - sweet cherry (*Prunus avium*)
-   * - ``pcer``
-     - sour cherry (*Prunus cerasus*)
+     - *Malus domestica*
+     - apple
    * - ``pdul``
-     - almond (*Prunus dulcis*)
+     - *Prunus amygdalus* syn. *Prunus dulcis*
+     - almond
    * - ``parm``
-     - apricot (*Prunus armeniaca*)
-   * - ``pcox``
-     - pear (*Pyrus communis*)
+     - *Prunus armeniaca*
+     - apricot
+   * - ``pavi``
+     - *Prunus avium*
+     - wild cherry
+   * - ``pcer``
+     - *Prunus cerasifera*
+     - cherry plum
+   * - ``ppe``
+     - *Prunus persica*
+     - peach
    * - ``psib``
-     - Siberian apricot (*Prunus sibirica*)
+     - *Prunus sibirica*
+     - siberian apricot
+   * - ``pcox``
+     - *Pyrus communis*
+     - pear
+   * - ``sly``
+     - *Solanum lycopersicum*
+     - tomato
+   * - ``stu``
+     - *Solanum tuberosum*
+     - potato
+   * - ``vvi``
+     - *Vitis vinifera*
+     - grapevine
 
 The genes of the crop species are translated from Arabidopsis by
 `skm-translate <https://github.com/NIB-SI/skm-translate>`_, which combines several orthology
@@ -105,7 +119,7 @@ CKN
 ===
 
 :func:`~skm_tools.load_networks.ckn_to_networkx` loads CKN as a :class:`networkx.DiGraph`,
-downloading the files from skm.nib.si if they don't exist yet:
+downloading the files from `skm.nib.si <https://skm.nib.si>`_ if they don't exist yet:
 
 .. code-block:: python
 

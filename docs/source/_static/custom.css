@@ -12,3 +12,13 @@
 .wy-table-responsive table th {
     white-space: normal;
 }
+
+/* cross-references to the API are code-formatted; colour them as links */
+.rst-content a code.xref,
+.rst-content a code.literal {
+    color: #2980b9;
+}
+.rst-content a:hover code.xref,
+.rst-content a:hover code.literal {
+    color: #3091d1;
+}
