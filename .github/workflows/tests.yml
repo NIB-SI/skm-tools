@@ -8,6 +8,7 @@ on:
       - 'skm_tools/**'
       - 'tests/**'
       - 'tutorials/**'
+      - 'docs/**'
       - '.github/workflows/tests.yml'
       - '.github/scripts/**'
   pull_request:
@@ -27,11 +28,14 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
 
-      - name: Install skm-tools with the test and cytoscape extras
-        run: pip install .[test,cytoscape]
+      - name: Install skm-tools with the test, cytoscape and pdf extras
+        run: pip install .[test,cytoscape,pdf]
 
       - name: Run the tests
         run: python -m pytest tests
+
+      - name: Run the examples in the docstrings
+        run: python -m pytest --doctest-modules skm_tools
 
   tutorials:
     # The tutorials download the networks from skm.nib.si, and are run without their
@@ -51,6 +55,14 @@ jobs:
       - name: Install skm-tools with the tutorials extra
         run: pip install .[tutorials] nbclient nbformat
 
+      # the networks are downloaded into tutorials/data/ (about 10 MB); kept between runs
+      # until the download URLs (skm_tools/skm_download_urls.py) change
+      - name: Cache the downloaded networks
+        uses: actions/cache@v4
+        with:
+          path: tutorials/data
+          key: tutorial-data-${{ hashFiles('skm_tools/skm_download_urls.py') }}
+
       - name: Strip the ci-skip cells (e.g. cells that need a running Cytoscape)
         run: >
           python .github/scripts/strip_ci_skip_cells.py
@@ -60,3 +72,23 @@ jobs:
       - name: Run ${{ matrix.notebook }}
         run: jupyter execute --kernel_name=python3 --timeout=900 .ci-${{ matrix.notebook }}.ipynb
         working-directory: tutorials
+
+  docs:
+    # the documentation builds without warnings (as deployed by deploy-docs.yml)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Pandoc
+        run: sudo apt-get update && sudo apt-get install -y pandoc
+
+      - name: Install skm-tools with the docs extra
+        run: pip install .[docs]
+
+      - name: Build the documentation, warnings as errors
+        run: python -m sphinx -W --keep-going -b html source build/html
+        working-directory: docs

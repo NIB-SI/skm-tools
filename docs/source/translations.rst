@@ -64,11 +64,21 @@ CKN
 ===
 
 :mod:`skm_tools.translate` translates the Arabidopsis genes of CKN to another species. Each
-Arabidopsis gene node is replaced by a node for each of its translations, keeping its edges:
+Arabidopsis gene node is replaced by a node for each of its translations, keeping its edges.
+The translation file is downloaded if missing (to the given path, or into ``data_dir`` as
+``translation_ath_to_<species>.tsv.gz``); its column of the species' genes is named after
+the species (e.g. ``apricot``), and is given as ``t_target_col``:
 
 .. code-block:: python
 
    from skm_tools.translate import load_translation_file, integrate_translation_ckn
 
-   translations = load_translation_file("parm", "translations-parm.tsv")
+   translations = load_translation_file("parm", data_dir="data")
    ckn_apricot = integrate_translation_ckn(ckn, translations, t_target_col="apricot")
+
+Translated nodes have ``translated_from`` (the Arabidopsis node) and ``translation`` (the
+gene); Arabidopsis genes without a translation are kept with ``translated`` False
+(``keep_unmapped=False`` drops them, with their edges). Complexes and nodes of other species
+are copied as they are. The translations of one Arabidopsis gene, and the genes of different
+Arabidopsis genes with the same translation, are linked by homology edges (``type`` and
+``interaction`` ``homology``, ``directed`` False).

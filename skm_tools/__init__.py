@@ -2,7 +2,20 @@
 
 The Cytoscape modules (:mod:`skm_tools.cytoscape_utils`, :mod:`skm_tools.cytoscape_pdf_utils`)
 need the optional extras and are not imported here.
+
+The functions log what they did (e.g. how many nodes a filter removed) with the standard
+:mod:`logging` module, under the ``skm_tools`` logger. To see the messages::
+
+    import logging
+    logging.basicConfig(level="INFO")
 '''
+
+from importlib.metadata import PackageNotFoundError, version
+
+try:
+    __version__ = version("skm-tools")
+except PackageNotFoundError:  # not installed, e.g. run from the source folder
+    __version__ = "unknown"
 
 import skm_tools.pss
 import skm_tools.ckn

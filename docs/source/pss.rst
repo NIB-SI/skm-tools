@@ -44,23 +44,26 @@ Loading
 
 All three are loaded as :class:`networkx.MultiDiGraph`, as several reactions (or roles)
 can link the same two nodes. Missing files are downloaded from
-`skm.nib.si <https://skm.nib.si>`_ to the given paths:
+`skm.nib.si <https://skm.nib.si>`_: to the given paths, or, without paths, into ``data_dir``
+(default: the current folder) under the names the browser gives them, without the export
+date (e.g. ``pss-public-interaction-network-edges.tsv``):
 
 .. code-block:: python
 
    from skm_tools.pss import pss_interaction_network_to_networkx, pss_gene_network_to_networkx
 
-   pss = pss_interaction_network_to_networkx(
-       "pss-interaction-network-edges-public.tsv",
-       "pss-interaction-network-nodes-public.tsv",
-   )
+   pss = pss_interaction_network_to_networkx(data_dir="data")
    pss.nodes["WRKY33[fc00166]"]["display_label"]   # 'WRKY33'
 
-   pss_stu = pss_gene_network_to_networkx(
-       "pss-gene-network-stu-edges-public.tsv",
-       "pss-gene-network-stu-nodes-public.tsv",
-       species="stu",   # for the download; default "ath"
-   )
+   pss_stu = pss_gene_network_to_networkx(species="stu", data_dir="data")   # default species "ath"
+
+   # or with your own file names
+   pss = pss_interaction_network_to_networkx("pss-edges.tsv", "pss-nodes.tsv")
+
+The loaders record which network a graph is in ``g.graph["pss_network"]``
+(``"reaction_graph"``, ``"interaction_network"`` or ``"gene_network"``, and the species of a
+gene network in ``g.graph["species"]``), so the functions below can check that they are
+used on a network they work on.
 
 In the files, lists are joined with ``|`` (names can contain ``,``, e.g. ``AHK2,3,4``, and
 gene symbols ``;``, e.g. ``PIP1;3``), and the loaders return them as Python lists. Empty
@@ -110,10 +113,12 @@ Filtering
 =========
 
 The filtering functions change the graph in place (make a copy first, ``g.copy()``, to
-keep the original), and return the reasons nodes were removed. They work on whole
-reactions where it matters, so the networks stay consistent: in the reaction graph a
-reaction is a node, and in the interaction network and the gene networks it is the edges
-with its ``reaction_id``. Nodes left without edges are removed too.
+keep the original), and return the reasons nodes were removed (``{node: reason}``). They
+work on whole reactions where it matters, so the networks stay consistent: in the reaction
+graph a reaction is a node, and in the interaction network and the gene networks it is the
+edges with its ``reaction_id``. Afterwards, nodes without edges are removed too (also those
+that had none before; ``remove_isolates=False`` keeps them). Arguments taking a list also
+take a single value, e.g. ``species="stu"``.
 
 :func:`~skm_tools.pss.remove_reactions` removes reactions by id, in all three networks.
 
@@ -141,6 +146,9 @@ gone):
 (not an input or modifier of any reaction), which are dead ends in directed analyses. In
 the reaction graph, the reactions forming them are removed too; in the interaction network
 and the gene networks, the binding partners' mutual edges from those reactions are kept.
+The two can give different results: in the interaction network, the substrate of a
+degradation has no outgoing edge, so a complex that is only degraded is a dead end there,
+but not in the reaction graph.
 
 Simplifying
 ===========
@@ -150,13 +158,23 @@ for the reaction graph.
 
 :func:`~skm_tools.pss.simplify_pss` merges the parallel edges (one per reaction) between two
 nodes into one edge, and returns a new :class:`networkx.DiGraph`. The merged edge keeps all
-``reaction_id`` values, and one value of every other attribute (with a printed warning if
-they differ, e.g. a positive and a negative influence). To keep such edges apart, pass
-``split_on_attrs=["interaction"]``; the result is then a :class:`networkx.MultiDiGraph`.
+``reaction_id`` values (a sorted list; every edge of the result has a list), and one value of
+every other attribute, by a fixed rule: ``interaction`` becomes ``unknown-influence`` if the
+merged edges disagree (e.g. a positive and a negative influence), ``directed`` is True if
+any edge is directed, ``rank`` the lowest, and anything else the value of the first
+reaction. How many merged edges had differing values is logged (``verbose=True`` lists
+them). To keep such edges apart, pass ``split_on_attrs=["interaction"]``; the result is then
+a :class:`networkx.MultiDiGraph`.
 
 :func:`~skm_tools.pss.remove_and_rewire` removes nodes while connecting each of their
 upstream nodes to each of their downstream nodes, e.g. to hide intermediate steps. It needs
-a simple :class:`networkx.DiGraph`, so run :func:`~skm_tools.pss.simplify_pss` first.
+a simple :class:`networkx.DiGraph`, so run :func:`~skm_tools.pss.simplify_pss` first. The
+nodes are removed one at a time, so chains of removed nodes are bridged. A new edge A → C
+(replacing A → B → C) has the sign of the chain (e.g. an activation followed by an
+inhibition: ``negative-influence``) and the reaction ids of both edges; if A → C exists
+already, it is merged into it. Rewiring doesn't go through the mutual edges between binding
+partners, only through complex formation (partner → complex). ``dry_run=True`` returns the
+edges that would be added, without changing the graph.
 
 :func:`~skm_tools.pss.remove_duplicated_binding_edges` keeps one direction of each mutual
 binding edge, for a less cluttered drawing. Don't use it before path or neighbourhood analysis.
@@ -166,4 +184,5 @@ binding edge, for a less cluttered drawing. Don't use it before path or neighbou
    from skm_tools.pss import simplify_pss, remove_and_rewire
 
    simple = simplify_pss(pss)
-   remove_and_rewire(simple, ["JA-Ile"])
+   planned = remove_and_rewire(simple, ["JA-Ile"], dry_run=True)   # [(u, v, data), ...]
+   reasons = remove_and_rewire(simple, ["JA-Ile"])

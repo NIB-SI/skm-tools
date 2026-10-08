@@ -7,7 +7,7 @@ each as ``<bin code>_<full bin name>``, e.g.
 
 import re
 
-from .utils import to_node_list
+from .utils import as_list
 
 
 def get_all_annotations(g, key="mapman"):
@@ -17,13 +17,14 @@ def get_all_annotations(g, key="mapman"):
     ----------
     g : networkx.Graph
     key : str
-        Node attribute holding a list (or None), e.g. ``"mapman"`` (default) or ``"tissue"``.
+        Node attribute holding a list, a single value, or None, e.g. ``"mapman"`` (default)
+        or ``"tissue"``. A single value (e.g. a string) counts as a one-item list.
 
     Returns
     -------
     set
     '''
-    return {x for _, d in g.nodes(data=True) if d.get(key) is not None for x in d[key]}
+    return {x for _, d in g.nodes(data=True) for x in as_list(d.get(key)) or []}
 
 
 def get_nodes_by_mapman(g, bins, children=True):
@@ -54,7 +55,7 @@ def get_nodes_by_mapman(g, bins, children=True):
     >>> get_nodes_by_mapman(g, "26.11")
     ['AT2G38470']
     '''
-    codes = [b.split("_")[0] for b in to_node_list(bins)]
+    codes = [b.split("_")[0] for b in as_list(bins)]
     if children:
         pattern = re.compile("^(" + "|".join(re.escape(c) for c in codes) + r")[._]")
     else:

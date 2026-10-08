@@ -4,9 +4,15 @@ paths, create subnetworks, and export images.
 Requires the ``cytoscape`` extra (``pip install skm-tools[cytoscape]``) and a running
 Cytoscape (https://cytoscape.org) for py4cytoscape to talk to.
 
+Functions acting on a network take it as ``network`` (a SUID or a name; default: the
+current network in Cytoscape). Needs Cytoscape 3.10 or later.
+
 py4cytoscape's console output (e.g. the text of errors that are handled, such as the
 retries in :func:`clone_network`) is silenced when this module is imported, see
 :func:`silence_py4cytoscape`.
+
+The helpers that don't need Cytoscape (matching image files to nodes, chart definitions)
+are in :mod:`skm_tools.node_images`, and also available here.
 
 Nodes and edges are matched to Cytoscape by name: a node's ``name`` is its networkx node
 id, and an edge's ``name`` is ``"source (interaction) target"``, where ``interaction`` is
@@ -17,20 +23,27 @@ between the same two nodes are matched together.
 
 import logging
 import re
-import shutil
 import sys
 import time
 import uuid
 from collections import defaultdict
 from pathlib import Path
 
-import networkx as nx
 import pandas as pd
 import py4cytoscape as p4c
 
 from . import resources
+from .neighbors import neighborhood_nodes
+from .node_images import (  # noqa: F401 (also here, for convenience)
+    chart_column,
+    match_files_to_nodes,
+    node_file_key,
+    unique_image_copies,
+)
 from .paths import path_edges
-from .utils import to_node_list
+from .utils import as_list, contrast_color
+
+logger = logging.getLogger(__name__)
 
 
 _P4C_QUIET = True
@@ -50,10 +63,13 @@ def silence_py4cytoscape(silence=True):
     '''Silence (or restore) py4cytoscape's console output.
 
     py4cytoscape prints the text of every error it raises, also of errors that are caught
-    and handled (e.g. the retries in :func:`clone_network`), prints progress messages in
-    notebooks, and has a console logger. Silenced when this module is imported. The errors
-    are still raised, with the same text, so nothing is lost; py4cytoscape's detailed log
-    file (``logs/py4cytoscape.log`` in the working directory) is not affected.
+    and handled (e.g. the retries in :func:`clone_network`), and prints progress messages
+    in notebooks. Silenced when this module is imported. The errors are still raised,
+    usually with the same text. But when Cytoscape's error response isn't JSON,
+    py4cytoscape prints the response and raises a plain ``HTTPError`` ("500 Server Error
+    ... for url ..."): silenced, Cytoscape's message is then only in py4cytoscape's log file
+    (``logs/py4cytoscape.log`` in the working directory, not affected by this). When
+    debugging, call ``silence_py4cytoscape(False)``.
 
     Parameters
     ----------
@@ -91,11 +107,18 @@ silence_py4cytoscape()
 # Matching networkx nodes/edges to Cytoscape SUIDs
 # ---------------------------------------------------------------------------
 
-def _node_suids(nodes, network=None):
-    '''Cytoscape SUIDs of the nodes named `nodes` (names not in the network are skipped).'''
-    nodes = {str(n) for n in nodes}
+def _node_suids(nodes, network=None, warn=True):
+    '''Cytoscape SUID -> name of the nodes named `nodes`; names not in the network are
+    skipped, with a warning.'''
+    names = {str(n) for n in as_list(nodes) or []}
     table = p4c.tables.get_table_columns(table="node", columns=["name"], network=network)
-    return [int(suid) for suid, name in table["name"].items() if name in nodes]
+    found = {int(suid): name for suid, name in table["name"].items() if name in names}
+    missing = names - set(found.values())
+    if missing and warn:
+        shown = ", ".join(sorted(missing)[:10]) + (", ..." if len(missing) > 10 else "")
+        logger.warning("%d of %d nodes not in the Cytoscape network: %s",
+                       len(missing), len(names), shown)
+    return found
 
 
 def _match_edge_names(edge_names, edge_pairs):
@@ -137,12 +160,12 @@ def _match_edge_names(edge_names, edge_pairs):
 
 
 def _edge_suids(edge_pairs, network=None):
-    '''Cytoscape SUIDs of the edges between each (u, v) pair (all parallel edges).'''
+    '''Cytoscape SUID -> (u, v) of the edges between each (u, v) pair (all parallel edges).'''
     edge_pairs = list(edge_pairs)
     if not edge_pairs:
-        return []
+        return {}
     table = p4c.tables.get_table_columns(table="edge", columns=["name"], network=network)
-    return [int(suid) for suid in _match_edge_names(table["name"].to_dict(), edge_pairs)]
+    return {int(suid): pair for suid, pair in _match_edge_names(table["name"].to_dict(), edge_pairs).items()}
 
 
 # ---------------------------------------------------------------------------
@@ -161,7 +184,7 @@ def set_style(style, network=None):
     style : str
         Visual style name.
     network : int or str, optional
-        Cytoscape network (default: the current network).
+        Cytoscape network, SUID or name (default: the current network).
     '''
     if network is not None:
         p4c.set_current_network(network)
@@ -191,19 +214,17 @@ def load_network(g, title, collection=None, style=None):
     '''
     suid = p4c.networks.create_network_from_networkx(g, title=title, collection=collection)
     if style:
-        apply_builtin_style(suid, style)
+        apply_builtin_style(style, network=suid)
     return suid
 
 
-def apply_builtin_style(suid, style="skm"):
+def apply_builtin_style(style="skm", network=None):
     '''Apply one of the bundled SKM visual styles to a Cytoscape network.
 
     The styles are imported into Cytoscape on first use (from ``skm-styles.xml``).
 
     Parameters
     ----------
-    suid : int
-        Cytoscape network SUID.
     style : {"skm", "skm-reactions"}
         ``"skm"`` (style *SKM*, default): for CKN, the PSS interaction network and the PSS
         gene networks. Nodes by ``node_type`` (the PSS classes, in the PSS Explorer's
@@ -213,7 +234,13 @@ def apply_builtin_style(suid, style="skm"):
         ``"skm-reactions"`` (style *SKM-reactions*): for the PSS reaction graph, with
         reactions as nodes, and edges by ``edge_type`` (activation, inhibition, substrate,
         product, ...) labelled with their ``role``.
-        The older names ``"pss"`` and ``"ckn"`` apply *SKM*.
+    network : int or str, optional
+        Cytoscape network, SUID or name (default: the current network).
+
+    Returns
+    -------
+    str
+        The style name (*SKM* or *SKM-reactions*).
     '''
     key = style.lower()
     if key not in resources.BUILTIN_STYLES:
@@ -224,46 +251,51 @@ def apply_builtin_style(suid, style="skm"):
     if style_name not in p4c.styles.get_visual_style_names():
         p4c.import_visual_styles(resources.get_style_xml_path())
 
-    set_style(style_name, suid)
-    print(f"Applied {style_name} to {suid}")
+    set_style(style_name, network)
+    return style_name
 
 
 # ---------------------------------------------------------------------------
 # Highlighting (style bypasses)
 # ---------------------------------------------------------------------------
 
-def highlight_nodes(node_names, colour=None, label_color=None, border_color=None, border_width=None,
+_NODE_BYPASSES = ("NODE_FILL_COLOR", "NODE_LABEL_COLOR", "NODE_BORDER_PAINT", "NODE_BORDER_WIDTH",
+                  "NODE_HEIGHT", "NODE_WIDTH")
+_EDGE_BYPASSES = ("EDGE_STROKE_UNSELECTED_PAINT", "EDGE_UNSELECTED_PAINT", "EDGE_WIDTH")
+
+
+def highlight_nodes(nodes, color=None, label_color=None, border_color=None, border_width=None,
                     node_height=None, node_width=None, network=None):
     '''Highlight nodes with style bypasses.
 
     Only the given properties are changed. Bypasses stay when the visual style changes;
-    clear them in Cytoscape (or with py4cytoscape) to undo.
+    see :func:`clear_highlights` to undo them.
 
     Parameters
     ----------
-    node_names : node or iterable of nodes
-        Nodes to highlight (names not in the network are skipped).
-    colour, label_color, border_color : str, optional
+    nodes : node or iterable of nodes
+        Nodes to highlight (names not in the network are skipped, with a warning).
+    color, label_color, border_color : str, optional
         Fill, label and border colours, as hex (``"#FF0000"``).
     border_width, node_height, node_width : float, optional
         Sizes in pixels.
     network : int or str, optional
-        Cytoscape network (default: the current network).
+        Cytoscape network, SUID or name (default: the current network).
 
     Returns
     -------
-    list of int
-        SUIDs of the highlighted nodes.
+    list of str
+        The names of the highlighted nodes.
     '''
-    nodes_by_suid = _node_suids(to_node_list(node_names), network=network)
-    if not nodes_by_suid:
-        return nodes_by_suid
+    found = _node_suids(nodes, network=network)
+    if not found:
+        return []
 
     # to set back, see bug https://github.com/cytoscape/py4cytoscape/issues/114
     og_style = p4c.styles.get_current_style(network)
 
     bypasses = [
-        (colour, p4c.style_bypasses.set_node_color_bypass),
+        (color, p4c.style_bypasses.set_node_color_bypass),
         (label_color, p4c.style_bypasses.set_node_label_color_bypass),
         (border_color, p4c.style_bypasses.set_node_border_color_bypass),
         (border_width, p4c.style_bypasses.set_node_border_width_bypass),
@@ -271,59 +303,68 @@ def highlight_nodes(node_names, colour=None, label_color=None, border_color=None
         (node_width, p4c.style_bypasses.set_node_width_bypass),
     ]
     for value, set_bypass in bypasses:
-        if value:
-            set_bypass(nodes_by_suid, value, network=network)
+        if value is not None:
+            set_bypass(list(found), value, network=network)
 
     set_style(og_style, network)
 
-    return nodes_by_suid
+    return list(found.values())
 
 
-def highlight_edges(edge_pairs, colour, skip_edges=None, edge_line_width=10, network=None):
+def highlight_edges(edges, color, skip_edges=None, edge_line_width=10, directed=True, network=None):
     '''Highlight edges with style bypasses (colour and line width).
 
     Parameters
     ----------
-    edge_pairs : iterable of tuple
+    edges : iterable of tuple
         Edges as (u, v) or (u, v, key) tuples, e.g. from :func:`skm_tools.paths.path_edges`.
         All parallel edges between u and v are highlighted.
-    colour : str
+    color : str
         Edge colour, as hex.
     skip_edges : iterable of tuple, optional
         (u, v) pairs not to highlight, e.g. edges already highlighted in another colour.
     edge_line_width : float
         Line width in pixels (default 10).
+    directed : bool
+        If False, also highlight the edges v -> u (e.g. for paths from
+        ``get_paths(..., directed=False)``, which can use an edge against its direction).
     network : int or str, optional
-        Cytoscape network (default: the current network).
+        Cytoscape network, SUID or name (default: the current network).
 
     Returns
     -------
     list of tuple
-        The (u, v) pairs highlighted (after skipping).
+        The (u, v) pairs highlighted: found in the network, and not skipped.
     '''
     skip = {(e[0], e[1]) for e in (skip_edges or [])}
-    edges = list(dict.fromkeys((e[0], e[1]) for e in edge_pairs if (e[0], e[1]) not in skip))
+    pairs = [(e[0], e[1]) for e in edges]
+    if not directed:
+        pairs += [(v, u) for u, v in pairs]
+    pairs = [p for p in dict.fromkeys(pairs) if p not in skip]
 
-    edges_by_suid = _edge_suids(edges, network=network)
-    if edges_by_suid:
-        p4c.style_bypasses.set_edge_line_width_bypass(edges_by_suid, edge_line_width, network=network)
-        p4c.style_bypasses.set_edge_color_bypass(edges_by_suid, colour, network=network)
+    found = _edge_suids(pairs, network=network)
+    if found:
+        p4c.style_bypasses.set_edge_line_width_bypass(list(found), edge_line_width, network=network)
+        p4c.style_bypasses.set_edge_color_bypass(list(found), color, network=network)
 
-    return edges
+    # as given (the Cytoscape names are strings)
+    by_name = {(str(u), str(v)): (u, v) for u, v in pairs}
+    return list(dict.fromkeys(by_name[pair] for pair in found.values()))
 
 
-def highlight_path(node_names, colour, skip_nodes=None, skip_edges=None, label_color="white",
-                   border_color="black", border_width=10, edge_line_width=10, network=None):
+def highlight_path(nodes, color, skip_nodes=None, skip_edges=None, label_color="white",
+                   border_color="black", border_width=10, edge_line_width=10, directed=True,
+                   network=None):
     '''Highlight the nodes and edges of a path.
 
-    To highlight several paths in different colours without overwriting, pass the nodes
-    and edges returned by earlier calls as `skip_nodes` and `skip_edges`.
+    To highlight several paths in different colours without painting over earlier ones,
+    pass the nodes and edges returned by the earlier calls as `skip_nodes` and `skip_edges`.
 
     Parameters
     ----------
-    node_names : list
+    nodes : list
         The path, as a list of nodes.
-    colour : str
+    color : str
         Node fill and edge colour, as hex.
     skip_nodes : iterable, optional
         Nodes not to highlight.
@@ -333,148 +374,158 @@ def highlight_path(node_names, colour, skip_nodes=None, skip_edges=None, label_c
         Node label and border colours (default white and black).
     border_width, edge_line_width : float
         Node border and edge widths in pixels (default 10).
+    directed : bool
+        If False, also highlight the edge v -> u of each step u, v (for paths from
+        ``get_paths(..., directed=False)``).
     network : int or str, optional
-        Cytoscape network (default: the current network).
+        Cytoscape network, SUID or name (default: the current network).
 
     Returns
     -------
     nodes : list
-        The path's nodes.
+        The path's nodes that were highlighted.
     edges : list of tuple
         The path's (u, v) edges that were highlighted.
     '''
-    node_names = list(node_names)
+    nodes = list(nodes)
     skip_nodes = set(skip_nodes or [])
-    nodes_for_highlight = [n for n in node_names if n not in skip_nodes]
+    to_highlight = [n for n in nodes if n not in skip_nodes]
 
+    highlighted = []
     # the edges are highlighted even if all nodes already are (e.g. a path between two coloured nodes)
-    if nodes_for_highlight:
-        highlight_nodes(
-            nodes_for_highlight,
-            colour=colour,
-            label_color=label_color,
-            border_color=border_color,
-            border_width=border_width,
-            network=network
-        )
+    if to_highlight:
+        names = set(highlight_nodes(to_highlight, color=color, label_color=label_color,
+                                    border_color=border_color, border_width=border_width,
+                                    network=network))
+        highlighted = [n for n in to_highlight if str(n) in names]
 
-    edge_pairs = list(zip(node_names, node_names[1:]))
-    edges = highlight_edges(edge_pairs, colour, skip_edges=skip_edges, edge_line_width=edge_line_width,
-                            network=network)
+    edges = highlight_edges(list(zip(nodes, nodes[1:])), color, skip_edges=skip_edges,
+                            edge_line_width=edge_line_width, directed=directed, network=network)
 
-    return node_names, edges
+    return highlighted, edges
 
 
-def contrast_colour(colour):
-    '''The complementary colour, e.g. for a label on a node of colour `colour`.
+def clear_highlights(nodes=None, edges=None, network=None):
+    '''Remove the highlights (style bypasses) of :func:`highlight_nodes`,
+    :func:`highlight_edges` and :func:`highlight_path`.
+
+    Cytoscape clears bypasses one node and one property at a time, which takes a while for
+    many nodes: pass the nodes and edges that were highlighted (as returned by the highlight
+    functions) rather than clearing everything.
 
     Parameters
     ----------
-    colour : str
-        Hex colour (``"#RRGGBB"``).
+    nodes : iterable, optional
+        Nodes to clear. Default: all nodes, if `edges` isn't given either.
+    edges : iterable of tuple, optional
+        (u, v) edges to clear. Default: all edges, if `nodes` isn't given either.
+    network : int or str, optional
+        Cytoscape network, SUID or name (default: the current network).
+    '''
+    if nodes is None and edges is None:
+        node_suids = list(p4c.tables.get_table_columns(table="node", columns=["name"], network=network).index)
+        edge_suids = list(p4c.tables.get_table_columns(table="edge", columns=["name"], network=network).index)
+    else:
+        node_suids = list(_node_suids(nodes, network=network)) if nodes is not None else []
+        edge_suids = list(_edge_suids(edges, network=network)) if edges is not None else []
+
+    for prop in _NODE_BYPASSES if node_suids else ():
+        p4c.style_bypasses.clear_node_property_bypass(node_suids, prop, network=network)
+    for prop in _EDGE_BYPASSES if edge_suids else ():
+        p4c.style_bypasses.clear_edge_property_bypass(edge_suids, prop, network=network)
+
+
+def apply_shortest_paths_style(g, sources, path_lists, edge_colors=None, node_colors=None,
+                               style_name=None, network=None):
+    '''Colour the results of several path searches (e.g. one per source) in a new visual style.
+
+    Adds node columns ``distance-to-target`` (the number of steps to the end of the path; on
+    several paths, the smallest) and ``node-path-source`` (the first search whose paths
+    have the node), and the edge column ``edge-priority`` (``"direct path (<source>)"``), then
+    copies the network's current style to `style_name`, with colour mappings on them.
+
+    Parameters
+    ----------
+    g : networkx.Graph
+        Graph the paths were found in (to find their edges, see
+        :func:`skm_tools.paths.path_edges`).
+    sources : list
+        The source of each search (its label in ``edge-priority``).
+    path_lists : list of list
+        Paths found by each search: one list of paths per source, in the same order.
+    edge_colors : list of str, optional
+        Hex colour for the edges of each source's paths, one per source.
+    node_colors : list of str, optional
+        Hex colours for a continuous node colour mapping on ``distance-to-target``, from the
+        target (distance 0) to the farthest node. With one colour, the second is white.
+    style_name : str, optional
+        Name of the new style (default: ``"<current style>-shortest-paths"``; replaced if it
+        exists).
+    network : int or str, optional
+        Cytoscape network, SUID or name (default: the current network).
 
     Returns
     -------
     str
-        Hex colour.
-    '''
-    rgb = int(colour.lstrip('#'), 16)
-    complementary_colour = 0xffffff-rgb
-    return f'#{complementary_colour:06X}'
-
-
-def apply_shortest_paths_style(sources, path_lists, target, g, edge_colors=None, node_colors=None, network=None):
-    '''Colour shortest-path results from several searches into a new visual style.
-
-    Adds node columns ``distance-to-target`` and ``node-path-source``, and the edge column
-    ``edge-priority`` (``"direct path (<source>)"``), then copies the current style to
-    ``<style>-shortest-paths-query`` with colour mappings on them.
-
-    Parameters
-    ----------
-    sources : list
-        Source node of each search.
-    path_lists : list of list
-        Paths found by each search: one list of paths per source, in the same order.
-    target : node
-        The common target of the searches.
-    g : networkx.Graph
-        Graph the paths were found in (for distances to the target).
-    edge_colors : list of str, optional
-        Hex colours for the edges of each source's paths, one per source.
-    node_colors : list of str, optional
-        Hex colours for a continuous node colour mapping on distance to the target
-        (closest first); at least two.
-    network : int or str, optional
-        Cytoscape network (default: the current network).
+        The style name.
     '''
     og_style = p4c.styles.get_current_style(network)
-    new_style = f'{og_style}-shortest-paths-query'
-    p4c.styles.copy_visual_style(og_style, new_style)
+    if style_name is None:
+        style_name = og_style if og_style.endswith("-shortest-paths") else f"{og_style}-shortest-paths"
+    if style_name != og_style:
+        copy_style(og_style, style_name, overwrite=True)
 
-    path_searches_attributes = defaultdict(dict)
+    node_attributes = defaultdict(dict)
     edge_priority = {}
 
     for source, paths in zip(sources, path_lists):
-        nodes = {n for p in paths for n in p}
-        for node in nodes:
-            path_searches_attributes[node]['distance-to-target'] = nx.shortest_path_length(g, source=node, target=target)
-            # the first search that reaches a node claims it
-            path_searches_attributes[node].setdefault('node-path-source', source)
+        for p in paths:
+            for i, node in enumerate(p):
+                distance = len(p) - 1 - i
+                d = node_attributes[str(node)]
+                d["distance-to-target"] = min(distance, d.get("distance-to-target", distance))
+                # the first search that reaches a node claims it
+                d.setdefault("node-path-source", str(source))
 
-        for suid in _edge_suids(path_edges(paths, g), network=network):
-            edge_priority.setdefault(suid, {'edge-priority': f"direct path ({source})"})
+        for suid in _edge_suids(path_edges(g, paths), network=network):
+            edge_priority.setdefault(suid, {"edge-priority": f"direct path ({source})"})
 
-    p4c.tables.load_table_data(
-        pd.DataFrame.from_dict(path_searches_attributes, orient='index').rename_axis('name').reset_index(),
-        data_key_column='name',
-        table='node',
-        table_key_column="name",
-        network=network
-    )
-
-    p4c.tables.load_table_data(
-        pd.DataFrame.from_dict(edge_priority, orient='index').rename_axis('SUID').reset_index(),
-        data_key_column='SUID',
-        table='edge',
-        table_key_column="SUID",
-        network=network
-    )
-
-    if node_colors:
-        max_len = max(x['distance-to-target'] for x in path_searches_attributes.values())
-        n = len(node_colors)
-        node_color_mapping_range = [max_len * i / (n - 1) for i in range(n)]
-
-        p4c.style_mappings.set_node_color_mapping(
-            'distance-to-target',
-            table_column_values=node_color_mapping_range,
-            colors=node_colors,
-            mapping_type='c',
-            style_name=new_style,
-            network=network
+    if node_attributes:
+        p4c.tables.load_table_data(
+            pd.DataFrame.from_dict(node_attributes, orient="index").rename_axis("name").reset_index(),
+            data_key_column="name", table="node", table_key_column="name", network=network,
+        )
+    if edge_priority:
+        p4c.tables.load_table_data(
+            pd.DataFrame.from_dict(edge_priority, orient="index").rename_axis("SUID").reset_index(),
+            data_key_column="SUID", table="edge", table_key_column="SUID", network=network,
         )
 
+    if node_colors and node_attributes:
+        node_colors = list(node_colors) + (["#FFFFFF"] if len(node_colors) == 1 else [])
+        max_distance = max(d["distance-to-target"] for d in node_attributes.values()) or 1
+        n = len(node_colors)
+        values = [max_distance * i / (n - 1) for i in range(n)]
+
+        p4c.style_mappings.set_node_color_mapping(
+            "distance-to-target", table_column_values=values, colors=node_colors,
+            mapping_type="c", style_name=style_name, network=network,
+        )
         p4c.style_mappings.set_node_label_color_mapping(
-            'distance-to-target',
-            table_column_values=node_color_mapping_range,
-            colors=[contrast_colour(x) for x in node_colors],
-            mapping_type='c',
-            style_name=new_style,
-            network=network
+            "distance-to-target", table_column_values=values,
+            colors=[contrast_color(x) for x in node_colors],
+            mapping_type="c", style_name=style_name, network=network,
         )
 
     if edge_colors:
         p4c.style_mappings.set_edge_color_mapping(
-            'edge-priority',
-            table_column_values=[f'direct path ({source})' for source in sources],
-            colors=edge_colors,
-            mapping_type='d',
-            style_name=new_style,
-            network=network
+            "edge-priority",
+            table_column_values=[f"direct path ({source})" for source in sources],
+            colors=edge_colors, mapping_type="d", style_name=style_name, network=network,
         )
 
-    set_style(new_style, network)
+    set_style(style_name, network)
+    return style_name
 
 
 # ---------------------------------------------------------------------------
@@ -484,19 +535,20 @@ def apply_shortest_paths_style(sources, path_lists, target, g, edge_colors=None,
 _RETRIES = 20
 _RETRY_WAIT = 0.5  # seconds
 
-def clone_network(network, name=None, collection=None):
+
+def clone_network(name=None, collection=None, network=None):
     '''Clone a Cytoscape network into a new collection, optionally renaming both.
 
     py4cytoscape's ``clone_network`` doesn't rename the new collection; this does.
 
     Parameters
     ----------
-    network : int or str
-        Cytoscape network to clone.
     name : str, optional
         Name of the clone.
     collection : str, optional
         Name of the clone's new collection.
+    network : int or str, optional
+        Cytoscape network to clone, SUID or name (default: the current network).
 
     Returns
     -------
@@ -506,6 +558,8 @@ def clone_network(network, name=None, collection=None):
     suid = p4c.networks.clone_network(network=network)
 
     if collection:
+        # py4cytoscape can't rename a collection: set the name in the collection's (root
+        # network's) default table through CyREST
         collection_suid = p4c.collections.get_collection_suid(suid)
         p4c.commands.cyrest_put(
             f"collections/{collection_suid}/tables/default",
@@ -514,8 +568,9 @@ def clone_network(network, name=None, collection=None):
         )
 
     if name:
-        # right after cloning, Cytoscape may not know the new network yet ("unrecognized
-        # table entry"), so retry for a few seconds
+        # after renaming the collection (renaming the network first didn't work in the
+        # original notebooks). Right after cloning, Cytoscape may not know the new network
+        # yet ("unrecognized table entry"), so retry for a few seconds
         for attempt in range(_RETRIES):
             try:
                 p4c.rename_network(name, network=suid)
@@ -528,7 +583,7 @@ def clone_network(network, name=None, collection=None):
     return suid
 
 
-def copy_style(style, new_style, networks=()):
+def copy_style(style, new_style, networks=(), overwrite=False):
     '''Copy a visual style, and apply the copy to `networks`.
 
     Parameters
@@ -539,13 +594,22 @@ def copy_style(style, new_style, networks=()):
         Name of the copy.
     networks : iterable of int or str, optional
         Networks to apply the copy to.
+    overwrite : bool
+        If a style `new_style` exists: replace it (True), or raise ValueError (False,
+        default). Cytoscape itself would add a number to the name.
 
     Returns
     -------
     str
         `new_style`.
     '''
+    if new_style in p4c.styles.get_visual_style_names():
+        if not overwrite:
+            raise ValueError(f"A style {new_style!r} exists already; use overwrite=True to replace it.")
+        p4c.styles.delete_visual_style(new_style)
     p4c.copy_visual_style(style, new_style)
+    if new_style not in p4c.styles.get_visual_style_names():
+        raise RuntimeError(f"Cytoscape didn't name the copy of {style!r} {new_style!r}.")
     for network in networks:
         set_style(new_style, network)
     return new_style
@@ -578,12 +642,12 @@ def delete_other_networks(keep):
 # Subnetworks
 # ---------------------------------------------------------------------------
 
-def subnetwork_edge_induced(edge_pairs, parent_suid, name="subnetwork (edge induced)"):
+def subnetwork_edge_induced(edges, parent_suid, name="subnetwork (edge induced)"):
     '''New Cytoscape network with only the given edges (and their nodes).
 
     Parameters
     ----------
-    edge_pairs : iterable of tuple
+    edges : iterable of tuple
         Edges as (u, v) or (u, v, key) tuples; all parallel edges between u and v are included.
     parent_suid : int
         SUID of the Cytoscape network to take them from.
@@ -595,27 +659,28 @@ def subnetwork_edge_induced(edge_pairs, parent_suid, name="subnetwork (edge indu
     int
         SUID of the new network.
     '''
-    edge_pairs = list(edge_pairs)
-    nodes = {n for e in edge_pairs for n in e[:2]}
+    edges = list(edges)
+    nodes = list(dict.fromkeys(n for e in edges for n in e[:2]))
 
     return p4c.networks.create_subnetwork(
-        nodes=_node_suids(nodes, network=parent_suid),
-        edges=_edge_suids(edge_pairs, network=parent_suid),
+        nodes=list(_node_suids(nodes, network=parent_suid)),
+        edges=list(_edge_suids(edges, network=parent_suid)),
         subnetwork_name=name,
         network=parent_suid,
         exclude_edges=True,
     )
 
 
-def subnetwork_edge_induced_from_paths(paths, g, parent_suid, name="subnetwork (edge induced)"):
+def subnetwork_edge_induced_from_paths(g, paths, parent_suid, name="subnetwork (edge induced)"):
     '''New Cytoscape network with only the edges along `paths`.
 
     Parameters
     ----------
+    g : networkx.Graph
+        Graph the paths were found in (to find their edges, see
+        :func:`skm_tools.paths.path_edges`).
     paths : list of list
         Paths as lists of nodes, e.g. from :func:`skm_tools.paths.get_paths`.
-    g : networkx.Graph
-        Graph the paths were found in (to find the edges, see :func:`skm_tools.paths.path_edges`).
     parent_suid : int
         SUID of the Cytoscape network to take them from.
     name : str
@@ -626,7 +691,7 @@ def subnetwork_edge_induced_from_paths(paths, g, parent_suid, name="subnetwork (
     int
         SUID of the new network.
     '''
-    return subnetwork_edge_induced(path_edges(paths, g), parent_suid, name=name)
+    return subnetwork_edge_induced(path_edges(g, paths), parent_suid, name=name)
 
 
 def subnetwork_node_induced(nodes, parent_suid, name="subnetwork (node induced)"):
@@ -640,7 +705,7 @@ def subnetwork_node_induced(nodes, parent_suid, name="subnetwork (node induced)"
     Parameters
     ----------
     nodes : iterable
-        Nodes to include.
+        Nodes to include (names not in the network are skipped, with a warning).
     parent_suid : int
         SUID of the Cytoscape network to take them from.
     name : str
@@ -652,18 +717,17 @@ def subnetwork_node_induced(nodes, parent_suid, name="subnetwork (node induced)"
         SUID of the new network.
     '''
     return p4c.networks.create_subnetwork(
-        nodes=_node_suids(to_node_list(nodes), network=parent_suid),
+        nodes=list(_node_suids(nodes, network=parent_suid)),
         subnetwork_name=name,
         network=parent_suid
     )
 
 
 def get_or_create_subnetwork(nodes, parent_suid, name):
-    '''The network called `name`, created with :func:`subnetwork_node_induced` if it
-    doesn't exist yet.
+    '''The network called `name` in the collection of `parent_suid`, created with
+    :func:`subnetwork_node_induced` if it doesn't exist yet.
 
-    For re-running notebook cells without making duplicate networks. Network names are
-    matched across all collections.
+    For re-running notebook cells without making duplicate networks.
 
     Parameters
     ----------
@@ -679,23 +743,32 @@ def get_or_create_subnetwork(nodes, parent_suid, name):
     int
         SUID of the (existing or new) network.
     '''
-    if name in p4c.get_network_list():
-        return p4c.get_network_suid(name)
+    collection = p4c.get_collection_networks(p4c.get_collection_suid(parent_suid))
+    for suid in collection:
+        if p4c.get_network_name(suid) == name:
+            return suid
     return subnetwork_node_induced(nodes, parent_suid, name=name)
 
 
-def subnetwork_neighbours(nodes, parent_suid, name="subnetwork (1st neighbours)"):
-    '''New Cytoscape network with `nodes`, their first neighbours, and every edge between them.
+def subnetwork_neighbours(g, nodes, parent_suid, depth=1, direction="both",
+                          name="subnetwork (neighbours)"):
+    '''New Cytoscape network with `nodes`, their neighbours, and every edge between them.
 
-    For deeper or directed neighbourhoods, use :func:`skm_tools.neighbors.neighborhood_nodes`
-    and pass the result to :func:`subnetwork_node_induced`.
+    The neighbours are found in `g` (see :func:`skm_tools.neighbors.neighborhood_nodes`),
+    so the selection in Cytoscape doesn't change.
 
     Parameters
     ----------
+    g : networkx.Graph
+        The network loaded as `parent_suid` (or the part of it to search).
     nodes : iterable
         Nodes whose neighbourhood to include.
     parent_suid : int
         SUID of the Cytoscape network to take them from.
+    depth : int or None
+        Number of steps (default 1: first neighbours).
+    direction : {"both", "out", "in"}
+        For directed graphs: neighbours in both directions (default), downstream or upstream.
     name : str
         Name of the new network.
 
@@ -704,52 +777,62 @@ def subnetwork_neighbours(nodes, parent_suid, name="subnetwork (1st neighbours)"
     int
         SUID of the new network.
     '''
-    p4c.select_nodes(
-        _node_suids(to_node_list(nodes), network=parent_suid),
-        by_col="SUID",
-        preserve_current_selection=False,
-        network=parent_suid
-    )
-    neighbours = p4c.select_first_neighbors(network=parent_suid)
-
-    return p4c.networks.create_subnetwork(
-        nodes=neighbours['nodes'],
-        subnetwork_name=name,
-        network=parent_suid
-    )
+    neighbours = neighborhood_nodes(g, nodes, depth=depth, direction=direction)
+    return subnetwork_node_induced(list(neighbours), parent_suid, name=name)
 
 
 # ---------------------------------------------------------------------------
-# Layout, custom graphics and export
+# Layout
 # ---------------------------------------------------------------------------
 
-def layout_from_coords(network, table):
-    '''Place nodes at given coordinates (e.g. from a graphviz or networkx layout).
+def layout_from_coords(positions, flip_y=True, scale=1.0, network=None):
+    '''Place nodes at given coordinates (e.g. from a networkx or graphviz layout).
+
+    Uses a temporary visual style that maps temporary node columns to the node positions,
+    and removes both afterwards (also on errors); the network's style and columns are left
+    as they were.
 
     Parameters
     ----------
-    network : int
-        Cytoscape network SUID.
-    table : pandas.DataFrame
-        Indexed by node name, with columns ``x`` and ``y``.
+    positions : dict or pandas.DataFrame
+        ``{node: (x, y)}`` (as returned by the networkx layout functions), or a DataFrame
+        indexed by node name with columns ``x`` and ``y``.
+    flip_y : bool
+        Mirror the y coordinates (default True): in networkx and graphviz y grows upwards,
+        in Cytoscape downwards.
+    scale : float
+        Multiply the coordinates by this (default 1). networkx layouts are within -1 and 1,
+        so use e.g. ``scale=500`` for them.
+    network : int or str, optional
+        Cytoscape network, SUID or name (default: the current network).
     '''
-    p4c.load_table_data(table, network=network)
+    if isinstance(positions, pd.DataFrame):
+        coords = positions[["x", "y"]].astype(float)
+    else:
+        coords = pd.DataFrame.from_dict({str(n): xy for n, xy in positions.items()},
+                                        orient="index", columns=["x", "y"]).astype(float)
+    coords.index = coords.index.map(str)
+    coords = coords * scale
+    if flip_y:
+        coords["y"] = -coords["y"]
 
+    tag = uuid.uuid4().hex[:8]
+    x_column, y_column, tmp_style = f"skm_tools_x_{tag}", f"skm_tools_y_{tag}", f"skm-tools-layout-{tag}"
     current_style = p4c.styles.get_current_style(network=network)
 
-    tmp_style = 'tmp-layout'
-    p4c.copy_visual_style(current_style, tmp_style)
-    set_style(tmp_style, network)
-
-    p4c.update_style_mapping(tmp_style, p4c.map_visual_property('NODE_X_LOCATION', 'x', 'p'))
-    p4c.update_style_mapping(tmp_style, p4c.map_visual_property('NODE_Y_LOCATION', 'y', 'p'))
-
-    p4c.delete_visual_style(tmp_style)
-
-    p4c.tables.delete_table_column('x', network=network)
-    p4c.tables.delete_table_column('y', network=network)
-
-    set_style(current_style, network)
+    p4c.load_table_data(coords.rename(columns={"x": x_column, "y": y_column}),
+                        table_key_column="name", network=network)
+    try:
+        p4c.copy_visual_style(current_style, tmp_style)
+        set_style(tmp_style, network)
+        p4c.update_style_mapping(tmp_style, p4c.map_visual_property('NODE_X_LOCATION', x_column, 'p'))
+        p4c.update_style_mapping(tmp_style, p4c.map_visual_property('NODE_Y_LOCATION', y_column, 'p'))
+    finally:
+        set_style(current_style, network)
+        if tmp_style in p4c.styles.get_visual_style_names():
+            p4c.delete_visual_style(tmp_style)
+        for column in (x_column, y_column):
+            p4c.tables.delete_table_column(column, network=network)
 
 
 # ---------------------------------------------------------------------------
@@ -766,122 +849,22 @@ IMAGE_POSITIONS = {
 }
 
 
-def node_file_key(name):
-    '''Default key for matching file names to node names (see :func:`match_files_to_nodes`).
-
-    Replaces the characters that can't (or shouldn't) be in file names with ``_``, e.g.
-    ``"WRKY33[fc00166]"`` -> ``"WRKY33_fc00166_"`` and ``"11-/12-OH-JA"`` ->
-    ``"11-_12-OH-JA"``; gene ids stay as they are.
-
-    Parameters
-    ----------
-    name : str
-        Node name, or file name without extension.
-
-    Returns
-    -------
-    str
-    '''
-    return re.sub(r"[^A-Za-z0-9_-]", "_", str(name))
-
-
-def match_files_to_nodes(folder, nodes, key=node_file_key, aliases=None, extensions=("png", "svg")):
-    '''Match image files (e.g. one plot per gene or metabolite) to nodes by name.
-
-    Parameters
-    ----------
-    folder : str or pathlib.Path
-        Folder with the files.
-    nodes : iterable
-        Node names, e.g. ``g.nodes()`` or ``py4cytoscape.get_all_nodes()``.
-    key : callable
-        Applied to node names and file names (without extension); they match if the keys
-        are equal. Default :func:`node_file_key`.
-    aliases : dict, optional
-        File name (without extension) -> node name, for files not named after their node
-        (e.g. ``{"Pro": "Proline accumulation"}``).
-    extensions : iterable of str
-        File extensions to use (default png and svg).
-
-    Returns
-    -------
-    dict
-        Node -> file path. Nodes with the same key get the same file. Files that match no
-        node are printed.
-    '''
-    aliases = aliases or {}
-    nodes_by_key = defaultdict(list)
-    for n in nodes:
-        nodes_by_key[key(n)].append(n)
-
-    matched, unmatched = {}, []
-    for ext in extensions:
-        for path in sorted(Path(folder).glob(f"*.{ext}")):
-            k = key(aliases.get(path.stem, path.stem))
-            if k in nodes_by_key:
-                matched.update({n: path for n in nodes_by_key[k]})
-            else:
-                unmatched.append(path.name)
-
-    if unmatched:
-        print(f"{len(unmatched)} files in {folder} match no node: {unmatched}")
-    return matched
-
-
-def unique_image_copies(images, folder, to_png=False):
-    '''Copy images to new, unique file names, optionally converting SVG to PNG.
-
-    Cytoscape caches images, and doesn't always notice that a file is a different one (e.g.
-    the same file name in another folder) or has changed: it may show an old image instead.
-    Every call makes new copies, with names that no other file has had (``<name>_<random
-    id>``), so Cytoscape has to load them again. Old copies are not deleted.
-
-    Parameters
-    ----------
-    images : dict
-        Node -> image path.
-    folder : str or pathlib.Path
-        Folder for the copies (created if needed).
-    to_png : bool
-        Convert SVG images to PNG. Needs ``cairosvg`` (``pip install cairosvg``).
-
-    Returns
-    -------
-    dict
-        Node -> path of the copy. Nodes with the same image share one copy.
-    '''
-    folder = Path(folder)
-    folder.mkdir(parents=True, exist_ok=True)
-
-    copy_of = {}
-    for path in {Path(p) for p in images.values()}:
-        convert = to_png and path.suffix.lower() == ".svg"
-        copy = folder / f"{path.stem}_{uuid.uuid4().hex[:12]}{'.png' if convert else path.suffix}"
-        if convert:
-            import cairosvg
-            cairosvg.svg2png(url=str(path), write_to=str(copy))
-        else:
-            shutil.copyfile(path, copy)
-        copy_of[path] = copy
-    return {node: copy_of[Path(p)] for node, p in images.items()}
-
-
 def load_node_images(images, column, network=None, unique_dir=None, to_png=False):
     '''Load image file locations into a node table column, for :func:`show_node_images`.
 
     Parameters
     ----------
     images : dict
-        Node name -> image path (e.g. from :func:`match_files_to_nodes`). Nodes not in the
-        network are ignored.
+        Node name -> image path (e.g. from :func:`skm_tools.node_images.match_files_to_nodes`).
+        Nodes not in the network are ignored.
     column : str
         Node table column to load them into, e.g. ``"image_heat_Desiree"``.
     network : int or str, optional
-        Cytoscape network (default: the current network).
+        Cytoscape network, SUID or name (default: the current network).
     unique_dir : str or pathlib.Path, optional
         Copy the images to this folder first, each to a new, unique file name (see
-        :func:`unique_image_copies`), so that Cytoscape's image cache can't show an old or
-        a different image instead.
+        :func:`skm_tools.node_images.unique_image_copies`), so that Cytoscape's image cache
+        can't show an old or a different image instead.
     to_png : bool
         With `unique_dir`: convert SVG images to PNG.
 
@@ -940,26 +923,39 @@ def show_node_images(style, column, slot=1, position="below", size=110):
     )
 
 
-def add_custom_png(network, create_png, style=None, column="fig_location", **kwargs):
-    '''Show an image (e.g. a small plot of experimental data) below each node, from a
+def add_custom_png(create_png, style=None, column="fig_location", slot=1, position="below",
+                   size=110, unique_dir=None, to_png=False, network=None, **kwargs):
+    '''Show an image (e.g. a small plot of experimental data) by each node, from a
     function that gives the image of a node.
 
     Combines :func:`load_node_images` and :func:`show_node_images`.
 
     Parameters
     ----------
-    network : int
-        Cytoscape network SUID.
     create_png : callable
         ``create_png(node_name, **kwargs)`` returns the path of a node's image, or None for
         no image. It can make the image (e.g. plot it with matplotlib), or only return the
         path of an existing one.
     style : str, optional
-        Visual style to show the images in (default: the network's current style).
+        Visual style to show the images in (default: the network's current style). The
+        bundled SKM styles (*SKM*, *SKM-reactions*) are shared by all networks, so they are
+        not changed: a copy, ``"<style>-<column>"``, is made (or replaced) and applied to the
+        network instead.
     column : str
         Node table column for the image locations (default ``"fig_location"``).
+    slot, position, size
+        As for :func:`show_node_images`.
+    unique_dir, to_png
+        As for :func:`load_node_images`.
+    network : int or str, optional
+        Cytoscape network, SUID or name (default: the current network).
     **kwargs
         Passed on to `create_png`.
+
+    Returns
+    -------
+    str
+        The style the images are shown in.
     '''
     images = {}
     for node in p4c.get_all_nodes(network=network):
@@ -969,92 +965,44 @@ def add_custom_png(network, create_png, style=None, column="fig_location", **kwa
 
     if style is None:
         style = p4c.styles.get_current_style(network=network)
+    if style in set(resources.BUILTIN_STYLES.values()):
+        style = copy_style(style, f"{style}-{column}", overwrite=True)
+        set_style(style, network)
 
-    load_node_images(images, column, network=network)
-    show_node_images(style, column)
-
-
-def chart_column(df, columns, colours, chart="barchart", value_range=None, labels=None,
-                 na_value=0, **options):
-    '''Chart definitions for each row of `df`, to show as node charts in Cytoscape.
-
-    Builds `enhancedGraphics <https://apps.cytoscape.org/apps/enhancedgraphics>`_ chart
-    strings (e.g. ``barchart: colorlist="..." valuelist="..."``); load them as a node table
-    column and show them like images, with :func:`show_node_images`. Needs the
-    enhancedGraphics app in Cytoscape.
-
-    Parameters
-    ----------
-    df : pandas.DataFrame
-        One row per node.
-    columns : list of str
-        Columns of `df` to chart, in order.
-    colours : str or list of str
-        Hex colour per column, or one for all.
-    chart : str
-        enhancedGraphics chart type, e.g. ``"barchart"`` (default), ``"linechart"``,
-        ``"heatstripchart"``, ``"piechart"``.
-    value_range : tuple of float, optional
-        (min, max) of the value axis (default: per chart, from its values).
-    labels : list of str, optional
-        Label per column (default: the column names).
-    na_value : float
-        Value for missing data (default 0).
-    **options
-        Further enhancedGraphics options, e.g. ``separation=2``, ``ybase=1``.
-
-    Returns
-    -------
-    pandas.Series
-        Chart string per row of `df`.
-
-    Examples
-    --------
-    >>> import pandas as pd
-    >>> df = pd.DataFrame({"t1": [1.5], "t2": [-0.5]}, index=["AT2G38470"])
-    >>> chart_column(df, ["t1", "t2"], "#E41A1C", value_range=(-2, 2)).iloc[0]
-    'barchart: colorlist="#E41A1C,#E41A1C" valuelist="1.5,-0.5" labellist="t1,t2" range="-2,2"'
-    '''
-    if isinstance(colours, str):
-        colours = [colours] * len(columns)
-    labels = labels or columns
-
-    fixed = f'colorlist="{",".join(colours)}"'
-    rest = f'labellist="{",".join(map(str, labels))}"'
-    if value_range is not None:
-        rest += f' range="{value_range[0]:g},{value_range[1]:g}"'
-    rest += "".join(f" {k}={v}" for k, v in options.items())
-
-    values = df[columns].astype(float).fillna(na_value)
-    return values.apply(
-        lambda row: f'{chart}: {fixed} valuelist="{",".join(f"{v:g}" for v in row)}" {rest}',
-        axis=1,
-    )
+    load_node_images(images, column, network=network, unique_dir=unique_dir, to_png=to_png)
+    show_node_images(style, column, slot=slot, position=position, size=size)
+    return style
 
 
 # ---------------------------------------------------------------------------
 # Export
 # ---------------------------------------------------------------------------
 
-def export_network(network, filename, format="PDF", wait=1.0, **kwargs):
+def export_network(filename, format="PDF", wait=1.0, network=None, **kwargs):
     '''Export a network view as an image, fitted to the content and with nothing selected.
 
     Parameters
     ----------
-    network : int
-        Cytoscape network SUID.
     filename : str or pathlib.Path
-        File to write (overwritten if it exists).
+        File to write (overwritten if it exists). py4cytoscape adds the extension of the
+        format if the name doesn't end with it.
     format : str
-        ``"PDF"`` (default), ``"PNG"``, ``"SVG"``, ...: see
+        ``"PDF"`` (default), ``"PNG"``, ``"SVG"``, ``"JPEG"``, ...: see
         ``py4cytoscape.network_views.export_image``.
     wait : float
         Seconds to wait before exporting (default 1). Cytoscape applies style changes (e.g.
         a new style, node images or charts) in the background, and an image exported
         right after them can miss some of them.
+    network : int or str, optional
+        Cytoscape network, SUID or name (default: the current network).
     **kwargs
         Passed on to ``py4cytoscape.network_views.export_image``, e.g. ``zoom=300`` or
-        ``transparent_background=True`` for PNG.
+        ``transparent_background=True`` for PNG. Needs Cytoscape 3.10 or later.
+
+    Returns
+    -------
+    pathlib.Path
+        The file written.
     '''
     # fit content ignores edges that may extend
     # past the node boundaries
@@ -1063,26 +1011,32 @@ def export_network(network, filename, format="PDF", wait=1.0, **kwargs):
     p4c.network_selection.clear_selection(type='both', network=network)
     time.sleep(wait)
 
-    p4c.network_views.export_image(
+    result = p4c.network_views.export_image(
         filename=str(Path(filename).absolute()),
         type=format,
         network=network,
         overwrite_file=True,
         **{"all_graphics_details": True, **kwargs},
     )
+    return Path(result["file"])
 
 
-def export_collection(network, folder, format="PNG", **kwargs):
+def export_collection(folder, format="PNG", crop=False, network=None, **kwargs):
     '''Export every network of a collection as an image (see :func:`export_network`).
 
     Parameters
     ----------
-    network : int
-        Any network of the collection.
     folder : str or pathlib.Path
-        Folder for the images (created if needed), named ``<network name>_<SUID>``.
+        Folder for the images (created if needed), named ``<network name>_<SUID>``, with the
+        extension of the format.
     format : str
         Image format (default ``"PNG"``).
+    crop : bool
+        PDF only: crop the margins of each file (see :func:`skm_tools.pdf_utils.crop_pdf`;
+        needs the ``pdf`` extra). To combine the files into one PDF, see
+        :func:`skm_tools.pdf_utils.combine_pdfs`.
+    network : int or str, optional
+        Any network of the collection, SUID or name (default: the current network).
     **kwargs
         Passed on to :func:`export_network`.
 
@@ -1091,13 +1045,19 @@ def export_collection(network, folder, format="PNG", **kwargs):
     list of pathlib.Path
         The files written.
     '''
+    if crop and format.upper() != "PDF":
+        raise ValueError("crop=True is for format='PDF'.")
     folder = Path(folder)
     folder.mkdir(parents=True, exist_ok=True)
+    if network is None:
+        network = p4c.get_network_suid()
 
     files = []
     for suid in sorted(p4c.get_collection_networks(p4c.get_collection_suid(network))):
         name = re.sub(r"[^A-Za-z0-9]+", "_", p4c.get_network_name(suid)).strip("_")
-        filename = folder / f"{name}_{suid}.{format.lower()}"
-        export_network(suid, filename, format=format, **kwargs)
-        files.append(filename)
+        files.append(export_network(folder / f"{name}_{suid}", format=format, network=suid, **kwargs))
+    if crop:
+        from .pdf_utils import crop_pdf
+        for f in files:
+            crop_pdf(f)
     return files

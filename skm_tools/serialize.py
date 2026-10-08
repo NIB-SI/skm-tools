@@ -7,14 +7,15 @@ step for when plain data is needed (JSON files, web APIs, other languages).
 import math
 
 import networkx as nx
+import pandas as pd
 
 
 def to_json_safe(x):
     '''Recursively convert a value to JSON-safe Python types.
 
     dict -> dict (keys as str), list/tuple/set -> list (sets sorted when possible),
-    numpy scalars and arrays -> Python values and lists, NaN/inf -> None, and anything
-    else that isn't str/int/float/bool/None -> ``str(x)``.
+    numpy scalars and arrays -> Python values and lists, NaN/inf and pandas' ``NA``/``NaT``
+    -> None, and anything else that isn't str/int/float/bool/None -> ``str(x)``.
 
     Parameters
     ----------
@@ -25,13 +26,23 @@ def to_json_safe(x):
     -------
     object
         A value that :func:`json.dumps` accepts.
+
+    Raises
+    ------
+    ValueError
+        If two keys of a dict are the same as strings (e.g. ``1`` and ``"1"``).
     '''
-    if x is None or isinstance(x, (str, bool, int)):
+    if x is None or x is pd.NA or x is pd.NaT:
+        return None
+    if isinstance(x, (str, bool, int)):
         return x
     if isinstance(x, float):
         return x if math.isfinite(x) else None
     if isinstance(x, dict):
-        return {str(k): to_json_safe(v) for k, v in x.items()}
+        safe = {str(k): to_json_safe(v) for k, v in x.items()}
+        if len(safe) < len(x):
+            raise ValueError(f"Keys that are the same as strings: {sorted(map(repr, x))}")
+        return safe
     if isinstance(x, (set, frozenset)):
         try:
             x = sorted(x)
@@ -62,6 +73,13 @@ def graph_to_dict(g):
         Edge keys are only included for multigraphs. Attribute values are converted with
         :func:`to_json_safe`. Read back with :func:`graph_from_dict`.
 
+    Raises
+    ------
+    ValueError
+        If a node id is not a string or an integer (e.g. a tuple, which JSON can't keep), or
+        an attribute has the name of a field of the format: ``id`` (nodes), ``source``,
+        ``target`` or ``key`` (edges). Rename such attributes first.
+
     Examples
     --------
     >>> import networkx as nx
@@ -69,6 +87,12 @@ def graph_to_dict(g):
     >>> graph_to_dict(g)["edges"]
     [{'source': 'A', 'target': 'B', 'weight': 1}]
     '''
+    bad_ids = [n for n in g if not isinstance(n, (str, int))]
+    if bad_ids:
+        raise ValueError(f"Node ids must be strings or integers for JSON, not e.g. {bad_ids[0]!r}.")
+    _check_attribute_names((d for _, d in g.nodes(data=True)), ("id",), "node")
+    _check_attribute_names((d for *_, d in g.edges(data=True)), ("source", "target", "key"), "edge")
+
     nodes = [{**to_json_safe(data), "id": to_json_safe(n)} for n, data in g.nodes(data=True)]
 
     if g.is_multigraph():
@@ -95,6 +119,13 @@ def graph_to_dict(g):
     }
 
 
+def _check_attribute_names(attribute_dicts, reserved, what):
+    clashes = sorted({k for d in attribute_dicts for k in d if k in reserved})
+    if clashes:
+        raise ValueError(f"{what.capitalize()} attributes {clashes} clash with the fields of the "
+                         f"JSON format ({', '.join(reserved)}); rename them first.")
+
+
 def graph_from_dict(data, create_using=None):
     '''Rebuild a networkx graph from :func:`graph_to_dict` output.
 
@@ -109,8 +140,8 @@ def graph_from_dict(data, create_using=None):
     Returns
     -------
     networkx.Graph
-        Node ids and attribute values come back as their JSON types (e.g. tuples become
-        lists, sets become sorted lists).
+        Attribute values come back as their JSON types (e.g. tuples become lists, sets
+        become sorted lists).
     '''
     if create_using is None:
         create_using = {
@@ -134,19 +165,56 @@ def graph_from_dict(data, create_using=None):
     return g
 
 
-def path_to_dict(paths):
-    '''Paths as JSON-safe data.
+def paths_to_dict(paths, g=None, node_attrs=("display_label",), edge_attrs=("interaction",)):
+    '''Paths as JSON-safe data, optionally with node and edge attributes.
 
     Parameters
     ----------
     paths : list of list
         Paths as lists of nodes, e.g. from :func:`skm_tools.paths.get_paths`.
+    g : networkx.Graph, optional
+        The graph of the paths: to add the `node_attrs` of the nodes and the `edge_attrs` of
+        each step.
+    node_attrs : iterable of str
+        Node attributes to add (with `g`; default ``display_label``).
+    edge_attrs : iterable of str
+        Edge attributes to add (with `g`; default ``interaction``).
 
     Returns
     -------
     dict
         ``{"paths": [[node, ...], ...], "lengths": [int, ...]}``, where a path's length
-        is its number of edges.
+        is its number of edges. With `g`, also ``"nodes"``: ``{node: {attribute: value}}`` for
+        the nodes on the paths, and ``"steps"``: per path, a list of
+        ``{"source": u, "target": v, attribute: value}`` per edge. A step against the edge
+        direction (paths from ``get_paths(..., directed=False)``) has the attributes of the
+        reverse edge, and ``"reversed": True``. In a multigraph, an attribute's value is the
+        list of the values of the parallel edges.
+
+    Examples
+    --------
+    >>> import networkx as nx
+    >>> g = nx.DiGraph([("A", "B", {"interaction": "positive-influence"})])
+    >>> paths_to_dict([["A", "B"]], g, node_attrs=())["steps"]
+    [[{'source': 'A', 'target': 'B', 'interaction': 'positive-influence'}]]
     '''
-    paths = [to_json_safe(list(p)) for p in paths]
-    return {"paths": paths, "lengths": [len(p) - 1 for p in paths]}
+    paths = [list(p) for p in paths]
+    result = {"paths": to_json_safe(paths), "lengths": [len(p) - 1 for p in paths]}
+    if g is None:
+        return result
+
+    def step(u, v):
+        d = {"source": u, "target": v}
+        if not g.has_edge(u, v):
+            u, v = v, u
+            d["reversed"] = True
+        edges = list(g[u][v].values()) if g.is_multigraph() else [g[u][v]]
+        for a in edge_attrs:
+            values = [e.get(a) for e in edges]
+            d[a] = values if g.is_multigraph() else values[0]
+        return d
+
+    on_paths = dict.fromkeys(n for p in paths for n in p)
+    result["nodes"] = to_json_safe({n: {a: g.nodes[n].get(a) for a in node_attrs} for n in on_paths})
+    result["steps"] = to_json_safe([[step(u, v) for u, v in zip(p, p[1:])] for p in paths])
+    return result

@@ -23,59 +23,68 @@ def _assert_min_cut(g, sources, targets, cut, size):
 
 def test_bottleneck_edge():
     g = _graph([("A", "B"), ("A", "C"), ("B", "D"), ("C", "D"), ("D", "E")])
-    assert get_cutset(["A"], ["E"], g) == [("D", "E")]
+    assert get_cutset(g, ["A"], ["E"]) == [("D", "E")]
 
 
-def test_parallel_paths_all_cut(capsys):
+def test_parallel_paths_all_cut(caplog):
     g = _graph([("A", "B"), ("A", "C"), ("B", "D"), ("C", "D")])
-    _assert_min_cut(g, ["A"], ["D"], get_cutset(["A"], ["D"], g), 2)
-    assert "max_flow = 2" in capsys.readouterr().out
+    with caplog.at_level("INFO", logger="skm_tools"):
+        cut, flow = get_cutset(g, ["A"], ["D"], return_flow=True)
+    _assert_min_cut(g, ["A"], ["D"], cut, 2)
+    assert flow == 2
+    assert "max_flow = 2" in caplog.text
 
 
 def test_capacity_is_used():
     g = _graph([("A", "B"), ("B", "C")])
     g["B"]["C"]["capacity"] = 5
-    assert get_cutset(["A"], ["C"], g) == [("A", "B")]
+    assert get_cutset(g, ["A"], ["C"]) == [("A", "B")]
 
 
 def test_several_sources_and_targets():
     g = _graph([("S1", "X"), ("S2", "X"), ("X", "T1"), ("X", "T2"), ("S2", "T2")])
-    cut = get_cutset(["S1", "S2"], ["T1", "T2"], g)
+    cut = get_cutset(g, ["S1", "S2"], ["T1", "T2"])
     # max flow 3: S1 -> X -> T1, S2 -> X -> T2, S2 -> T2
     _assert_min_cut(g, ["S1", "S2"], ["T1", "T2"], cut, 3)
 
 
 def test_cut_disconnects_sources_from_targets():
     g = _graph([("A", "B"), ("B", "C"), ("A", "C"), ("C", "D"), ("B", "D"), ("D", "E"), ("C", "E")])
-    _assert_min_cut(g, ["A"], ["E"], get_cutset(["A"], ["E"], g), 2)
+    _assert_min_cut(g, ["A"], ["E"], get_cutset(g, ["A"], ["E"]), 2)
 
 
-def test_no_path_gives_empty_cut(capsys):
+def test_no_path_gives_empty_cut():
     g = _graph([("A", "B"), ("C", "D")])
-    assert get_cutset(["A"], ["D"], g) == []
-    assert "max_flow = 0" in capsys.readouterr().out
+    assert get_cutset(g, ["A"], ["D"], return_flow=True) == ([], 0)
 
 
-def test_missing_nodes_and_source_target_overlap_ignored():
+def test_missing_nodes_and_source_target_overlap_ignored(caplog):
     g = _graph([("A", "B"), ("B", "C")])
     g["B"]["C"]["capacity"] = 5
-    assert get_cutset(["A", "missing"], ["C", "A", "also missing"], g) == [("A", "B")]
+    assert get_cutset(g, ["A", "missing"], ["C", "A", "also missing"]) == [("A", "B")]
+    assert "1 of 2 sources not in the graph: missing" in caplog.text
+
+
+def test_single_nodes():
+    g = _graph([("A", "B"), ("B", "C")])
+    g["B"]["C"]["capacity"] = 5
+    assert get_cutset(g, "A", "C") == [("A", "B")]
 
 
 def test_node_names_like_source_and_sink():
     g = _graph([("source", "x"), ("x", "sink")])
     g["x"]["sink"]["capacity"] = 5
-    assert get_cutset(["source"], ["sink"], g) == [("source", "x")]
+    assert get_cutset(g, ["source"], ["sink"]) == [("source", "x")]
 
 
 def test_graph_not_changed():
     g = _graph([("A", "B"), ("B", "C")])
     before = (set(g.nodes()), set(g.edges()))
-    get_cutset(["A"], ["C"], g)
+    get_cutset(g, ["A"], ["C"])
     assert (set(g.nodes()), set(g.edges())) == before
 
 
 def test_missing_capacity_raises():
     g = nx.DiGraph([("A", "B"), ("B", "C")])
     with pytest.raises(nx.NetworkXUnbounded):
-        get_cutset(["A"], ["C"], g)
+        get_cutset(g, ["A"], ["C"])

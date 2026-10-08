@@ -1,47 +1,47 @@
 '''Translate Arabidopsis (ath) networks to other species with SKM gene translation files.'''
-from urllib.request import urlretrieve
-import pandas as pd
 from pathlib import Path
 
 import networkx as nx
+import pandas as pd
 
-from .skm_download_urls import GENE_TRANSLATION_URL
+from .skm_download_urls import GENE_TRANSLATION_FILE, GENE_TRANSLATION_URL
+from .utils import download_if_missing
 
 
-def load_translation_file(species_code, translation_path):
+def load_translation_file(species_code, translation_path=None, data_dir="."):
     """Load a SKM gene translation file, downloading it from skm.nib.si if missing.
 
     Parameters
     ----------
     species_code : str
-        SKM species code of the translation (e.g. ``"parm"`` for apricot).
-    translation_path : str or pathlib.Path
-        Local file; downloaded here if it doesn't exist (so it can be reused offline).
-        The download is gzipped, so give it a ``.tsv.gz`` name (e.g. ``"stu.tsv.gz"``).
+        SKM species code of the translation (e.g. ``"stu"`` for potato, ``"parm"`` for apricot).
+    translation_path : str or pathlib.Path, optional
+        Local file (default ``<data_dir>/translation_ath_to_<species_code>.tsv.gz``);
+        downloaded if it doesn't exist (so it can be reused offline), gzipped if the name
+        ends in ``.gz``.
+    data_dir : str or pathlib.Path
+        Folder for the default file name (default: the current folder).
 
     Returns
     -------
     pandas.DataFrame
-        The translation table.
+        The translation table: the Arabidopsis genes (``ath_source``), the genes of the
+        species (a column named after the species, e.g. ``potato``), and the evidence. All
+        values are strings (empty: None).
     """
+    if translation_path is None:
+        translation_path = Path(data_dir) / GENE_TRANSLATION_FILE.format(species_code)
+    translation_path = download_if_missing(translation_path, GENE_TRANSLATION_URL.format(species_code))
 
-    translation_path = Path(translation_path)
+    df = pd.read_csv(translation_path, sep='\t', dtype=str, keep_default_na=False, na_values=[""])
+    return df.astype(object).where(df.notna(), None)
 
-    if not translation_path.exists():
-        url = GENE_TRANSLATION_URL.format(species_code)
-        print(f"Attempting to download the translation file for {species_code} from {url} ...", end=" ")
-        urlretrieve(url, translation_path)
-        print("Success.")
-
-    df = pd.read_csv(translation_path, sep='\t')
-
-    return df
 
 def integrate_translation_ckn(g,
                               translation_df,
+                              t_target_col,
                               g_source_attribute='TAIR',
                               t_source_col='ath_source',
-                              t_target_col='apricot',
                               method='full_replacement',
                               edges_within_translation=True,
                               edges_across_translation=True,
@@ -53,6 +53,10 @@ def integrate_translation_ckn(g,
     ``{original}_{translation}``, so one original can have several translations. Edges of
     the original node are copied to every new node. Nodes of other species are copied as is.
 
+    Translation edges (see `edges_within_translation`, `edges_across_translation`) have
+    ``type`` and ``interaction`` ``"homology"`` and ``directed`` False; in a directed graph,
+    they are added in both directions.
+
     Parameters
     ----------
     g : networkx.Graph
@@ -60,24 +64,25 @@ def integrate_translation_ckn(g,
     translation_df : pandas.DataFrame
         Translation table, e.g. from :func:`load_translation_file`, with a source
         (Arabidopsis) and a target identifier column.
+    t_target_col : str
+        Column of `translation_df` with the target species' identifiers (e.g. ``"potato"``).
     g_source_attribute : str
         Node attribute of `g` with the Arabidopsis identifier (default ``"TAIR"``).
     t_source_col : str
         Column of `translation_df` with the Arabidopsis identifiers (default ``"ath_source"``).
-    t_target_col : str
-        Column of `translation_df` with the target species' identifiers (default ``"apricot"``).
     method : {"full_replacement"}
         How to add the translations. Only ``"full_replacement"`` (replace the original nodes)
         is implemented; ``"pendant_nodes"`` (add translations as extra nodes linked to the
         originals) is planned.
     edges_within_translation : bool
-        Link the translations of the same original node to each other (``type`` ==
-        ``"translation"``, ``translation_relation`` == ``"same_translation_source"``).
+        Link the translations of the same original node to each other
+        (``translation_relation`` == ``"same_translation_source"``).
     edges_across_translation : bool
         Link the nodes of different originals that translate to the same gene
         (``translation_relation`` == ``"same_translation_target"``).
     keep_unmapped : bool
-        Keep ``ath`` nodes without a translation (with ``translated`` False), or drop them.
+        Keep ``ath`` nodes without a translation (with ``translated`` False), or drop them
+        and their edges.
 
     Returns
     -------
@@ -127,7 +132,7 @@ def integrate_translation_ckn(g,
         species = data.get('species')
         node_type = data.get('node_type')
 
-        if (species == 'ath') and (node_type != 'complex'):
+        if (species == 'ath') and (node_type != 'Complex'):
             if source_id in mapping:
                 target_ids = mapping[source_id]
                 new_node_ids = []
@@ -147,8 +152,9 @@ def integrate_translation_ckn(g,
 
     # add edges
     for u, v, data in g.edges(data=True):
-        u_new_ids = id_tracking.get(u, [u])
-        v_new_ids = id_tracking.get(v, [v])
+        # nodes dropped (keep_unmapped=False) have no new ids: their edges are dropped too
+        u_new_ids = id_tracking.get(u, [])
+        v_new_ids = id_tracking.get(v, [])
 
         for u_new in u_new_ids:
             for v_new in v_new_ids:
@@ -156,19 +162,23 @@ def integrate_translation_ckn(g,
 
 
     # supplemental edges
+    def add_translation_edges(groups, relation):
+        for new_nodes in groups:
+            for i in range(len(new_nodes)):
+                for j in range(i + 1, len(new_nodes)):
+                    pairs = [(new_nodes[i], new_nodes[j])]
+                    if g_translated.is_directed():
+                        pairs.append((new_nodes[j], new_nodes[i]))
+                    for u, v in pairs:
+                        g_translated.add_edge(u, v, translation_relation=relation, type="homology",
+                                              interaction="homology", directed=False)
+
     if edges_within_translation:
-        # add edges between translated nodes that share the same original node
-        for _, new_nodes in id_tracking.items():
-            if len(new_nodes) > 1:
-                for i in range(len(new_nodes)):
-                    for j in range(i + 1, len(new_nodes)):
-                        g_translated.add_edge(new_nodes[i], new_nodes[j], translation_relation='same_translation_source', type="translation")
+        # translations of the same original node
+        add_translation_edges(id_tracking.values(), "same_translation_source")
 
     if edges_across_translation:
-        for translation, new_nodes in translation_to_new_nodes.items():
-            if len(new_nodes) > 1:
-                for i in range(len(new_nodes)):
-                    for j in range(i + 1, len(new_nodes)):
-                        g_translated.add_edge(new_nodes[i], new_nodes[j], translation_relation='same_translation_target', type="translation")
+        # nodes of different originals that translate to the same gene
+        add_translation_edges(translation_to_new_nodes.values(), "same_translation_target")
 
     return g_translated

@@ -2,35 +2,56 @@
 
 The PSS exports (reaction graph, interaction network, per-species gene networks) are made by
 skm-pss-export (https://github.com/NIB-SI/skm-pss-export).
+
+The loaders record which network a graph is in ``g.graph["pss_network"]``
+(``"reaction_graph"``, ``"interaction_network"`` or ``"gene_network"``, with the species of a
+gene network in ``g.graph["species"]``); the functions here use it to check that they are
+applied to a network they work on.
 '''
 
-import csv
+import logging
 from collections import Counter
 from pathlib import Path
-from urllib.request import urlretrieve
 
 import networkx as nx
 import pandas as pd
 
 from .skm_download_urls import (
+    PSS_GENE_NETWORK_EDGE_FILE,
     PSS_GENE_NETWORK_EDGE_URL,
+    PSS_GENE_NETWORK_NODE_FILE,
     PSS_GENE_NETWORK_NODE_URL,
+    PSS_INTERACTION_NETWORK_EDGE_FILE,
     PSS_INTERACTION_NETWORK_EDGE_URL,
+    PSS_INTERACTION_NETWORK_NODE_FILE,
     PSS_INTERACTION_NETWORK_NODE_URL,
+    PSS_REACTION_GRAPH_EDGE_FILE,
     PSS_REACTION_GRAPH_EDGE_URL,
+    PSS_REACTION_GRAPH_NODE_FILE,
     PSS_REACTION_GRAPH_NODE_URL,
 )
-from .utils import remove_isolate_nodes, unique_item
+from .utils import (
+    as_list,
+    download_if_missing,
+    merge_values,
+    read_skm_table,
+    remove_isolate_nodes,
+    resolve_nodes,
+)
+
+logger = logging.getLogger(__name__)
+
+REACTION_GRAPH = "reaction_graph"
+INTERACTION_NETWORK = "interaction_network"
+GENE_NETWORK = "gene_network"
 
 
 # ---------------------------------------------------------------------------
 # Loading
 # ---------------------------------------------------------------------------
 
-# PSS exports (pss-export): tab-separated, header, no quoting, empty = no value,
-# lists joined with "|" (as in TAIR's files and GAF: names contain "," (AHK2,3,4) and
-# gene symbols ";" (PIP1;3); complex names, which contain "|", are never in a list).
-_PSS_LIST_SEPARATOR = "|"
+# PSS exports (pss-export): see skm_tools.utils.read_skm_table (complex names, which
+# contain "|", are never in a list)
 _PSS_LIST_COLUMNS = {
     "synonyms",
     "all_pathways",
@@ -59,52 +80,23 @@ _PSS_BOOL_COLUMNS = {
 }
 
 
-def _split_pss_list(x):
-    if x is None:
-        return None
-    # keep empty entries (as None) so per-cluster lists stay aligned
-    return [v if v else None for v in x.split(_PSS_LIST_SEPARATOR)]
-
-
-def _download_if_missing(path, url, what):
-    path = Path(path)
-    if not path.exists():
-        print(f"Attempting to download the {what} to {path}.", end=" ")
-        urlretrieve(url, path)
-        print("Success.")
-    return path
-
-
 def _read_pss_table(path, list_columns=()):
-    '''Read a PSS export table to a DataFrame of str/list/bool values, with None for empty.'''
-
-    df = pd.read_csv(path, sep="\t", dtype=str, keep_default_na=False, na_values=[""],
-                     quoting=csv.QUOTE_NONE)
-    df = df.astype(object).where(df.notna(), None)
-
-    list_columns = _PSS_LIST_COLUMNS | set(list_columns)
-    for c in df.columns:
-        if c in list_columns or c.endswith("_homologues"):
-            df[c] = df[c].map(_split_pss_list)
-        elif c in _PSS_BOOL_COLUMNS:
-            df[c] = df[c].map(lambda x: {"True": True, "False": False}[x] if x is not None else None)
-        elif c in _PSS_INT_COLUMNS:
-            df[c] = df[c].map(lambda x: int(x) if x is not None else None)
-
-    return df
+    '''Read a PSS export table: lists, booleans and integers converted, None for empty.'''
+    df = pd.read_csv(path, sep="\t", nrows=0)
+    list_columns = (_PSS_LIST_COLUMNS | set(list_columns)
+                    | {c for c in df.columns if c.endswith("_homologues")})
+    return read_skm_table(path, list_columns, _PSS_BOOL_COLUMNS, _PSS_INT_COLUMNS)
 
 
-def _pss_export_to_networkx(edge_path, node_path, edge_url, node_url, edge_key,
+def _pss_export_to_networkx(edge_path, node_path, edge_url, node_url, edge_key, network,
                             node_list_columns=()):
     '''Build a MultiDiGraph from a PSS export: nodes (with attributes) from the node file,
     edges from the edge file, keyed by the `edge_key` column. Missing files are downloaded
     from the URLs.'''
-    edge_path = _download_if_missing(edge_path, edge_url, "edge list")
-    node_path = _download_if_missing(node_path, node_url, "node annotations")
-    edge_df = _read_pss_table(edge_path)
-    node_df = _read_pss_table(node_path, node_list_columns)
+    edge_df = _read_pss_table(download_if_missing(edge_path, edge_url))
+    node_df = _read_pss_table(download_if_missing(node_path, node_url), node_list_columns)
 
-    g = nx.MultiDiGraph()
+    g = nx.MultiDiGraph(pss_network=network)
     g.add_nodes_from(
         (data.pop("id"), data) for data in node_df.to_dict("records")
     )
@@ -115,9 +107,36 @@ def _pss_export_to_networkx(edge_path, node_path, edge_url, node_url, edge_key,
     return g
 
 
-def pss_reaction_graph_to_networkx(edge_path, node_path):
-    ''' Load the PSS reaction graph export to a networkx directed multigraph,
-    including node attributes.
+def _paths(edge_path, node_path, data_dir, edge_file, node_file):
+    data_dir = Path(data_dir)
+    return (Path(edge_path) if edge_path is not None else data_dir / edge_file,
+            Path(node_path) if node_path is not None else data_dir / node_file)
+
+
+_PATH_PARAMETERS = '''
+    edge_path : str or pathlib.Path, optional
+        Path to the edge file (default ``<data_dir>/{edge_file}``); if the file does not
+        exist, it is downloaded from skm.nib.si.
+
+    node_path : str or pathlib.Path, optional
+        Path to the node file (default ``<data_dir>/{node_file}``); downloaded as for
+        `edge_path`.
+
+    data_dir : str or pathlib.Path
+        Folder for the default file names (default: the current folder).
+'''
+
+
+def pss_reaction_graph_to_networkx(edge_path=None, node_path=None, data_dir="."):
+    edge_path, node_path = _paths(edge_path, node_path, data_dir,
+                                  PSS_REACTION_GRAPH_EDGE_FILE, PSS_REACTION_GRAPH_NODE_FILE)
+    return _pss_export_to_networkx(edge_path, node_path, PSS_REACTION_GRAPH_EDGE_URL,
+                                   PSS_REACTION_GRAPH_NODE_URL, edge_key="role",
+                                   network=REACTION_GRAPH)
+
+
+pss_reaction_graph_to_networkx.__doc__ = ''' Load the PSS reaction graph export to a networkx
+    directed multigraph, including node attributes.
 
     Entities and reactions are both nodes (reactions have `node_type` == "reaction"), with one edge
     per reaction participant: participant -> reaction for inputs and modifiers,
@@ -127,21 +146,20 @@ def pss_reaction_graph_to_networkx(edge_path, node_path):
 
     Parameters
     ----------
-
-    edge_path : str or pathlib.Path
-        Path to the edge file (``pss-reaction-graph-edges-*.tsv``);
-        if the file does not exist, it is downloaded from skm.nib.si.
-
-    node_path : str or pathlib.Path
-        Path to the node file (``pss-reaction-graph-nodes-*.tsv``); downloaded as for `edge_path`.
-    '''
-    return _pss_export_to_networkx(edge_path, node_path, PSS_REACTION_GRAPH_EDGE_URL,
-                                   PSS_REACTION_GRAPH_NODE_URL, edge_key="role")
+''' + _PATH_PARAMETERS.format(edge_file=PSS_REACTION_GRAPH_EDGE_FILE,
+                              node_file=PSS_REACTION_GRAPH_NODE_FILE)
 
 
-def pss_interaction_network_to_networkx(edge_path, node_path):
-    ''' Load the PSS interaction network export to a networkx directed multigraph,
-    including node attributes.
+def pss_interaction_network_to_networkx(edge_path=None, node_path=None, data_dir="."):
+    edge_path, node_path = _paths(edge_path, node_path, data_dir,
+                                  PSS_INTERACTION_NETWORK_EDGE_FILE, PSS_INTERACTION_NETWORK_NODE_FILE)
+    return _pss_export_to_networkx(edge_path, node_path, PSS_INTERACTION_NETWORK_EDGE_URL,
+                                   PSS_INTERACTION_NETWORK_NODE_URL, edge_key="reaction_id",
+                                   network=INTERACTION_NETWORK)
+
+
+pss_interaction_network_to_networkx.__doc__ = ''' Load the PSS interaction network export to a
+    networkx directed multigraph, including node attributes.
 
     Entities are nodes, and edges are entity -> entity influences through reactions
     (`interaction`: positive-influence, negative-influence or unknown-influence).
@@ -151,21 +169,25 @@ def pss_interaction_network_to_networkx(edge_path, node_path):
 
     Parameters
     ----------
-
-    edge_path : str or pathlib.Path
-        Path to the edge file (``pss-interaction-network-edges-*.tsv``);
-        if the file does not exist, it is downloaded from skm.nib.si.
-
-    node_path : str or pathlib.Path
-        Path to the node file (``pss-interaction-network-nodes-*.tsv``); downloaded as for `edge_path`.
-    '''
-    return _pss_export_to_networkx(edge_path, node_path, PSS_INTERACTION_NETWORK_EDGE_URL,
-                                   PSS_INTERACTION_NETWORK_NODE_URL, edge_key="reaction_id")
+''' + _PATH_PARAMETERS.format(edge_file=PSS_INTERACTION_NETWORK_EDGE_FILE,
+                              node_file=PSS_INTERACTION_NETWORK_NODE_FILE)
 
 
-def pss_gene_network_to_networkx(edge_path, node_path, species="ath"):
-    ''' Load a PSS gene network export (one species) to a networkx directed multigraph,
-    including node attributes.
+def pss_gene_network_to_networkx(edge_path=None, node_path=None, species="ath", data_dir="."):
+    edge_path, node_path = _paths(edge_path, node_path, data_dir,
+                                  PSS_GENE_NETWORK_EDGE_FILE.format(species),
+                                  PSS_GENE_NETWORK_NODE_FILE.format(species))
+    g = _pss_export_to_networkx(edge_path, node_path,
+                                PSS_GENE_NETWORK_EDGE_URL.format(species),
+                                PSS_GENE_NETWORK_NODE_URL.format(species),
+                                edge_key="reaction_id", network=GENE_NETWORK,
+                                node_list_columns=_PSS_GENE_CLUSTER_COLUMNS)
+    g.graph["species"] = species
+    return g
+
+
+pss_gene_network_to_networkx.__doc__ = ''' Load a PSS gene network export (one species) to a
+    networkx directed multigraph, including node attributes.
 
     As the interaction network, but with functional clusters expanded into their genes
     of one species. Genes have the `node_type` of their cluster (``PlantCoding`` or
@@ -182,54 +204,77 @@ def pss_gene_network_to_networkx(edge_path, node_path, species="ath"):
 
     Parameters
     ----------
-
-    edge_path : str or pathlib.Path
-        Path to the edge file (``pss-gene-network-<species>-edges-*.tsv``);
-        if the file does not exist, it is downloaded from skm.nib.si.
-
-    node_path : str or pathlib.Path
-        Path to the node file (``pss-gene-network-<species>-nodes-*.tsv``); downloaded as for `edge_path`.
-
+''' + _PATH_PARAMETERS.format(edge_file=PSS_GENE_NETWORK_EDGE_FILE.format("<species>"),
+                              node_file=PSS_GENE_NETWORK_NODE_FILE.format("<species>")) + '''
     species : str
-        Species code of the gene network to download if the files are missing
-        (default ``"ath"``, see the SKM translations). Not used for existing files.
-    '''
-    return _pss_export_to_networkx(edge_path, node_path,
-                                   PSS_GENE_NETWORK_EDGE_URL.format(species),
-                                   PSS_GENE_NETWORK_NODE_URL.format(species),
-                                   edge_key="reaction_id",
-                                   node_list_columns=_PSS_GENE_CLUSTER_COLUMNS)
+        Species code of the gene network (default ``"ath"``, see the SKM translations): for
+        the default file names and the download. Stored in ``g.graph["species"]``.
+'''
 
 
 # ---------------------------------------------------------------------------
 # Filtering, simplifying and rewiring
 # ---------------------------------------------------------------------------
 
-def _is_reaction_graph(g):
-    return any(d.get("node_type") == "reaction" for _, d in g.nodes(data=True))
+def _network_kind(g):
+    '''Which PSS network `g` is: as recorded by the loaders in ``g.graph["pss_network"]``, or
+    else from its nodes (reaction nodes: the reaction graph; genes with a species: a gene
+    network).'''
+    kind = g.graph.get("pss_network")
+    if kind is not None:
+        return kind
+    kind = INTERACTION_NETWORK
+    for _, d in g.nodes(data=True):
+        if d.get("node_type") == "reaction":
+            return REACTION_GRAPH
+        if d.get("species"):
+            kind = GENE_NETWORK
+    return kind
 
 
 def _check_not_reaction_graph(g, func):
     '''The filtering and simplifying functions work on entity -> entity influences, so not on
     the reaction graph (reactions as nodes, no ``interaction`` on the edges).'''
-    if _is_reaction_graph(g):
+    if _network_kind(g) == REACTION_GRAPH:
         raise ValueError(f"{func} works on the PSS interaction network or a gene network, "
                          "not the reaction graph (it has reaction nodes).")
 
 
 def _reaction_ids(edge_data):
-    '''The reaction ids of an edge (merged edges, e.g. from simplify_pss, have several,
-    comma-joined).'''
+    '''The reaction ids of an edge, as a list (merged edges, e.g. from simplify_pss, have
+    several).'''
     r = edge_data.get("reaction_id")
-    return r.split(",") if r else []
+    if r is None:
+        return []
+    return [r] if isinstance(r, str) else list(r)
 
 
-def _node_reactions(g, n):
+def _node_reactions(g, n, reaction_graph):
     '''The reactions node `n` takes part in.'''
-    if _is_reaction_graph(g):
+    if reaction_graph:
         return {m for m in nx.all_neighbors(g, n) if g.nodes[m].get("node_type") == "reaction"}
     edges = list(g.in_edges(n, data=True)) + list(g.out_edges(n, data=True))
     return {r for _, _, d in edges for r in _reaction_ids(d)}
+
+
+def _merge_edge_data(edges, differing=None, log_level=logging.DEBUG):
+    '''Merge the attribute dicts of edges into one: all their reaction ids (a sorted list), and
+    for every other attribute the value of :func:`skm_tools.utils.merge_values`, applied in
+    reaction id order. Counts the attributes whose values differed in `differing`, and logs
+    them at `log_level`.'''
+    edges = sorted(edges, key=lambda d: _reaction_ids(d))
+    reaction_ids = sorted({r for d in edges for r in _reaction_ids(d)})
+    data = {}
+    for k in sorted(set().union(*(d.keys() for d in edges)) - {"reaction_id"}):
+        value, differ = merge_values(k, [d.get(k) for d in edges])
+        data[k] = value
+        if differ:
+            if differing is not None:
+                differing[k] += 1
+            logger.log(log_level, "%s --> %s: values %s, keeping %s", reaction_ids, k,
+                         [d.get(k) for d in edges], value)
+    data["reaction_id"] = reaction_ids
+    return data
 
 
 def remove_reactions(g, reaction_ids, remove_isolates=True):
@@ -244,10 +289,11 @@ def remove_reactions(g, reaction_ids, remove_isolates=True):
     ----------
     g : networkx.MultiDiGraph or networkx.DiGraph
         PSS network. Changed in place.
-    reaction_ids : iterable of str
+    reaction_ids : str or iterable of str
         Reactions to remove (e.g. ``["rx00001"]``); reactions not in `g` are ignored.
     remove_isolates : bool
-        Also remove nodes left without edges (default True).
+        Also remove nodes without edges afterwards (default True); this includes nodes that
+        had no edges before.
 
     Returns
     -------
@@ -261,13 +307,13 @@ def remove_reactions(g, reaction_ids, remove_isolates=True):
     >>> g = nx.MultiDiGraph()
     >>> _ = g.add_edge("A", "B", key="rx1", reaction_id="rx1")
     >>> _ = g.add_edge("B", "C", key="rx2", reaction_id="rx2")
-    >>> remove_reactions(g, ["rx1"])
+    >>> remove_reactions(g, "rx1")
     {'A': 'isolate'}
     '''
-    reaction_ids = set(reaction_ids)
+    reaction_ids = set(as_list(reaction_ids))
     reasons = {}
 
-    if _is_reaction_graph(g):
+    if _network_kind(g) == REACTION_GRAPH:
         reactions = [r for r in reaction_ids
                      if r in g and g.nodes[r].get("node_type") == "reaction"]
         g.remove_nodes_from(reactions)
@@ -281,7 +327,7 @@ def remove_reactions(g, reaction_ids, remove_isolates=True):
                 continue
             kept = [r for r in ids if r not in reaction_ids]
             if kept:
-                d["reaction_id"] = ",".join(kept)
+                d["reaction_id"] = kept
             else:
                 to_remove.append(tuple(e))
         g.remove_edges_from(to_remove)
@@ -311,26 +357,27 @@ def remove_deadend_complexes(g):
 
     Returns
     -------
-    list
-        The removed complexes.
+    dict
+        Removed node -> reason (``"dead-end complex"``; in the reaction graph also
+        ``"reaction removed"`` and ``"isolate"``).
     '''
-    reaction_graph = _is_reaction_graph(g)
-    removed_complexes = []
+    reaction_graph = _network_kind(g) == REACTION_GRAPH
+    reasons = {}
 
     while True:
         deadends = [n for n, data in g.nodes(data=True)
-                    if data["node_type"] == "Complex" and g.out_degree(n) == 0]
+                    if data.get("node_type") == "Complex" and g.out_degree(n) == 0]
         if not deadends:
             break
         if reaction_graph:
-            remove_reactions(g, set().union(*(_node_reactions(g, c) for c in deadends)),
-                             remove_isolates=True)
+            reactions = set().union(*(_node_reactions(g, c, True) for c in deadends))
+            reasons.update(remove_reactions(g, reactions, remove_isolates=True))
         g.remove_nodes_from(deadends)
-        removed_complexes += deadends
+        reasons.update({n: "dead-end complex" for n in deadends})
 
-    print(f"Number of complexes removed: {len(removed_complexes)}")
-
-    return removed_complexes
+    logger.info("Removed %d dead-end complexes.",
+                sum(r == "dead-end complex" for r in reasons.values()))
+    return reasons
 
 
 def filter_pss_nodes(g, node_types=None, species=None, remove_isolates=True):
@@ -348,11 +395,11 @@ def filter_pss_nodes(g, node_types=None, species=None, remove_isolates=True):
     ----------
     g : networkx.Graph
         PSS network. Changed in place.
-    node_types : list of str, optional
+    node_types : str or list of str, optional
         Keep only nodes of these ``node_type`` values (e.g. ``"PlantCoding"``, ``"Complex"``;
         in a gene network, genes have their cluster's class, e.g. ``"PlantCoding"``). Not for
         the reaction graph, where it would leave reactions with missing participants.
-    species : list of str, optional
+    species : str or list of str, optional
         Interaction network or reaction graph: remove the functional clusters without genes
         in any of these species (``<species>_homologues`` attributes, e.g. ``["stu"]``), the
         complexes with such a cluster among their components (``component_cluster_ids``),
@@ -360,7 +407,8 @@ def filter_pss_nodes(g, node_types=None, species=None, remove_isolates=True):
         kept, as metabolites. Merged edges (e.g. from :func:`simplify_pss`) are kept if
         they also come from other reactions. A gene network is already for one species.
     remove_isolates : bool
-        Also remove nodes left without edges (default True).
+        Also remove nodes without edges afterwards (default True); this includes nodes that
+        had no edges before.
 
     Returns
     -------
@@ -373,10 +421,13 @@ def filter_pss_nodes(g, node_types=None, species=None, remove_isolates=True):
     ValueError
         If `node_types` is given for the reaction graph, or `species` for a gene network.
     '''
-    if node_types:
-        _check_not_reaction_graph(g, "filter_pss_nodes(node_types=...)")
-    # gene networks: genes have a species (functional clusters, in the other networks, don't)
-    if species and any(d.get("species") for _, d in g.nodes(data=True)):
+    node_types = as_list(node_types)
+    species = as_list(species)
+    kind = _network_kind(g)
+    if node_types and kind == REACTION_GRAPH:
+        raise ValueError("filter_pss_nodes(node_types=...) works on the PSS interaction network "
+                         "or a gene network, not the reaction graph (it has reaction nodes).")
+    if species and kind == GENE_NETWORK:
         raise ValueError("species filtering is for the interaction network; a gene network "
                          "is already for one species (load the gene network of the species "
                          "instead).")
@@ -392,7 +443,7 @@ def filter_pss_nodes(g, node_types=None, species=None, remove_isolates=True):
         homologue_properties = [f"{sp}_homologues" for sp in species]
         missing_clusters = {
             data["functional_cluster_id"]: n for n, data in g.nodes(data=True)
-            if data.get("functional_cluster_id") and data["node_type"] != "PlantAbstract"
+            if data.get("functional_cluster_id") and data.get("node_type") != "PlantAbstract"
             and not any(data.get(h) for h in homologue_properties)
         }
         # complexes with such a cluster among their components (components not in `g` can't
@@ -407,16 +458,15 @@ def filter_pss_nodes(g, node_types=None, species=None, remove_isolates=True):
         # their reactions are not in the species: as in the species' gene network, remove
         # the whole reactions (not just these nodes' edges), then the nodes
         no_species = list(missing_clusters.values()) + missing_complexes
-        removed_reactions = set().union(*(_node_reactions(g, n) for n in no_species))
-        reactions_removed = remove_reactions(g, removed_reactions, remove_isolates=False)
-        reasons.update(reactions_removed)
+        reaction_graph = kind == REACTION_GRAPH
+        removed_reactions = set().union(*(_node_reactions(g, n, reaction_graph) for n in no_species))
+        reasons.update(remove_reactions(g, removed_reactions, remove_isolates=False))
         g.remove_nodes_from(no_species)
 
     if node_types:
-        # nodes not in keep_types
-        wrong_type = [n for n, data in g.nodes(data=True) if not (data['node_type'] in node_types)]
+        wrong_type = [n for n, data in g.nodes(data=True) if data.get("node_type") not in node_types]
         to_remove.update(wrong_type)
-        reasons = {**reasons, **{n:"wrong node type" for n in wrong_type if not n in reasons}}
+        reasons.update({n: "wrong node type" for n in wrong_type if n not in reasons})
 
     # now remove complexes with a component that is in the network, but would no longer be.
     # Components are matched by node id (`components`) and by functional cluster id
@@ -437,19 +487,15 @@ def filter_pss_nodes(g, node_types=None, species=None, remove_isolates=True):
         if gone.intersection((data.get("components") or []) + (data.get("component_cluster_ids") or []))
     ]
     to_remove.update(complex_component_missing)
-    reasons = {**reasons, **{n:"complex component removed" for n in complex_component_missing if not n in reasons}}
+    reasons.update({n: "complex component removed" for n in complex_component_missing if n not in reasons})
 
-    # remove the nodes
     g.remove_nodes_from(to_remove)
 
-    # remove isolates due to filtering
+    # all nodes left without edges (also those without edges before filtering)
     if remove_isolates:
-        isolate_reasons = remove_isolate_nodes(g)
-        reasons = {**reasons, **{n:r for n, r in isolate_reasons.items() if not n in reasons}}
+        reasons.update({n: r for n, r in remove_isolate_nodes(g).items() if n not in reasons})
 
-    now_size = g.number_of_nodes()
-    print(f"Removed {og_size - now_size} nodes from network.")
-
+    logger.info("Removed %d nodes from the network.", og_size - g.number_of_nodes())
     return reasons
 
 
@@ -459,95 +505,144 @@ def simplify_pss(g, split_on_attrs=None, verbose=False):
     Returns a new graph; `g` is unchanged. For the interaction network or a gene network,
     not the reaction graph (raises ValueError).
 
+    Merged edges get all ``reaction_id`` values, as a sorted list (edges that aren't merged get
+    a list too, so the attribute has one type). For every other attribute one value is kept,
+    by this rule (:func:`skm_tools.utils.merge_values`), ignoring missing values (None):
+
+    - all values equal: that value;
+    - ``interaction``: ``"unknown-influence"`` if they differ (e.g. a positive and a negative
+      influence);
+    - ``directed``: True if any edge is directed;
+    - ``rank``: the lowest;
+    - anything else: the value of the edge with the first reaction id.
+
     Parameters
     ----------
     g : networkx.MultiDiGraph
         PSS interaction network or gene network.
-    split_on_attrs : list of str, optional
+    split_on_attrs : str or list of str, optional
         Edge attributes (e.g. ``["interaction"]``) that must not be merged away: parallel
         edges are only merged with others that have the same values for all of them.
     verbose : bool
-        Print every merged edge whose attributes differed, with the value kept. Default:
-        one summary line, with the number of merged edges per differing attribute.
+        Log every merged edge whose attributes differed, with the value kept (INFO; otherwise
+        DEBUG). A summary, with the number of merged edges per differing attribute, is always
+        logged (INFO).
 
     Returns
     -------
     networkx.DiGraph or networkx.MultiDiGraph
         A DiGraph, or a MultiDiGraph with `split_on_attrs` (as edges that differ on them
-        stay separate). Merged edges get all ``reaction_id`` values, comma-joined; for every
-        other attribute a single value is kept, which is reported when the merged edges had
-        different values (e.g. a positive and a negative influence, see `verbose`).
+        stay separate). Graph attributes (e.g. ``pss_network``) are copied.
 
-    Notes
-    -----
-    TODO - hierarchy for keeping attributes?
+    Raises
+    ------
+    ValueError
+        If `g` is the reaction graph, or not a multigraph (e.g. already simplified).
     '''
-
     _check_not_reaction_graph(g, "simplify_pss")
-    split_on_attrs = split_on_attrs or []
+    if not g.is_multigraph():
+        raise ValueError("simplify_pss merges the parallel edges of a multigraph; this graph "
+                         "has none (already simplified?).")
+    split_on_attrs = as_list(split_on_attrs) or []
 
     new_g = nx.MultiDiGraph() if split_on_attrs else nx.DiGraph()
+    new_g.graph.update(g.graph)
     new_g.add_nodes_from(g.nodes(data=True))
     differing = Counter()  # attribute -> number of merged edges with differing values
 
-    for source in g.nodes():
-        edges_to_add = []
-        for target in g[source]:
-            edges = g[source][target]
-            if len(edges) == 1:
-                edges_to_add.append((source, target, next(iter(edges.values()))))
+    log_level = logging.INFO if verbose else logging.DEBUG
+
+    for source, target in dict.fromkeys(g.edges()):
+        groups = {}
+        for d in g[source][target].values():
+            groups.setdefault(tuple(d.get(a) for a in split_on_attrs), []).append(d)
+        for group_edges in groups.values():
+            if len(group_edges) == 1:
+                data = {**group_edges[0], "reaction_id": _reaction_ids(group_edges[0])}
             else:
-                if split_on_attrs:
-                    groups = {}
-                    for d in edges.values():
-                        key = tuple(d[attr] for attr in split_on_attrs)
-                        groups.setdefault(key, []).append(d)
-                else:
-                    groups = {None: list(edges.values())}
+                data = _merge_edge_data(group_edges, differing, log_level)
+            new_g.add_edge(source, target, **data)
 
-                for group_edges in groups.values():
-                    if len(group_edges) == 1:
-                        edges_to_add.append((source, target, group_edges[0]))
-                        continue
-                    data = {}
-                    reaction_ids = ",".join([d['reaction_id'] for d in group_edges])
-                    data['reaction_id'] = reaction_ids
-                    # merge every other attribute present on any of the edges being combined,
-                    # rather than a fixed whitelist, so nothing is silently dropped
-                    other_attrs = set().union(*(d.keys() for d in group_edges)) - {'reaction_id'}
-                    for k in sorted(other_attrs):
-                        v, m = unique_item([d.get(k) for d in group_edges])
-                        if not (m is None):
-                            differing[k] += 1
-                            if verbose:
-                                print(f"{reaction_ids} --> {k}: {m}\n\tKeeping: {v}.")
-                        data[k] = v
-                    edges_to_add.append((source, target, data))
-        new_g.add_edges_from(edges_to_add)
-
-    if differing and not verbose:
-        print("Merged edges with differing values (one value kept): "
-              + ", ".join(f"{k} ({n})" for k, n in differing.most_common())
-              + ". See verbose=True for details.")
+    if differing:
+        logger.info("Merged edges with differing values: %s. See the docstring for the value "
+                    "kept, and verbose=True for details.",
+                    ", ".join(f"{k} ({n})" for k, n in differing.most_common()))
 
     return new_g
 
 
-def remove_and_rewire(g, nodes, dry_run=False):
-    '''Remove nodes, connecting each of their upstream nodes to each downstream node.
+# signs of a chain A -> B -> C
+_COMPOSED_INTERACTION = {
+    ("positive-influence", "positive-influence"): "positive-influence",
+    ("positive-influence", "negative-influence"): "negative-influence",
+    ("negative-influence", "positive-influence"): "negative-influence",
+    ("negative-influence", "negative-influence"): "positive-influence",
+}
 
-    Changes `g` in place. Mutual binding edges (partner <-> partner) are not propagated,
-    only the complex-forming ones (partner -> complex). Prints a summary of removed nodes
-    for which no replacement edges were created.
+
+def _propagates(e):
+    '''Whether rewiring may go through edge `e`: not through the mutual edges between binding
+    partners (partner <-> partner), only the complex-forming ones (partner -> complex).'''
+    return not (e.get("reaction_type") == "binding/oligomerisation"
+                and e.get("target_role") != "product")
+
+
+def _rewired_edge(up, down, node):
+    '''The edge replacing up (A -> node) and down (node -> C).'''
+    data = {}
+    for k in set(up) | set(down):
+        if k.startswith("source_"):
+            data[k] = up.get(k)
+        elif k.startswith("target_"):
+            data[k] = down.get(k)
+        else:
+            data[k] = merge_values(k, [up.get(k), down.get(k)])[0]
+    data["reaction_id"] = sorted(set(_reaction_ids(up) + _reaction_ids(down)))
+    data["interaction"] = _COMPOSED_INTERACTION.get(
+        (up.get("interaction"), down.get("interaction")), "unknown-influence")
+    data["directed"] = True
+    data["note"] = f"rewired through {node}"
+    return data
+
+
+def remove_and_rewire(g, nodes, dry_run=False):
+    '''Remove nodes, connecting each of their upstream nodes to each of their downstream nodes.
+
+    Changes `g` in place. The nodes are removed one at a time, in the given order, each
+    against the graph as rewired so far, so chains of removed nodes (A -> B -> C -> D,
+    removing B and C) are bridged (A -> D).
+
+    Rewiring doesn't go through the mutual edges between binding partners
+    (partner <-> partner), in either direction, only through the complex-forming ones
+    (partner -> complex): A -> B and B <-> D (binding) give no A -> D, but A -> B and
+    B -> B|D give A -> B|D.
+
+    A new edge A -> C, replacing A -> B -> C:
+
+    - ``reaction_id``: the reaction ids of both edges (a sorted list);
+    - ``interaction``: the sign of the chain (positive and negative: negative; two negatives:
+      positive; anything with an unknown influence: unknown);
+    - ``directed``: True;
+    - ``source_*`` attributes from A -> B, ``target_*`` attributes from B -> C, and other
+      attributes as in :func:`simplify_pss` (:func:`skm_tools.utils.merge_values`);
+    - ``note``: ``"rewired through B"``.
+
+    If A -> C already exists, the new edge is merged into it, as in :func:`simplify_pss`.
 
     Parameters
     ----------
     g : networkx.DiGraph
         A simple directed graph, e.g. from :func:`simplify_pss`. Multigraphs are not supported.
-    nodes : iterable
-        Nodes to remove (nodes not in `g` are ignored).
+    nodes : node or iterable of nodes
+        Nodes to remove (nodes not in `g` are ignored, with a warning).
     dry_run : bool
-        Only print the summary; don't change `g`.
+        Don't change `g`; return the edges that would be added instead.
+
+    Returns
+    -------
+    dict or list
+        Removed node -> reason (``"rewired"``, or ``"nothing to rewire"`` if no edge replaced
+        it); with `dry_run`, the edges ``(u, v, data)`` that would be added or changed.
 
     Raises
     ------
@@ -555,147 +650,38 @@ def remove_and_rewire(g, nodes, dry_run=False):
         If `g` is a multigraph or undirected.
     ValueError
         If `g` is the reaction graph.
-
-    Notes
-    -----
-    New edges get all ``reaction_id`` values of the two edges they replace, comma-joined, and a
-    single value of ``reaction_type``, ``reaction_effect`` and ``interaction`` (without a warning
-    if they differ), plus a ``note``. TODO - hierarchy for keeping attributes?
     '''
-
-    def generate_dict():
-        return {"reaction_id": [], "reaction_type": [], "reaction_effect": [], "interaction": []}
-
-    nodes_to_remove_and_rewire = set(nodes).intersection(g.nodes)
-
-    all_new_edges = []
-
     _check_not_reaction_graph(g, "remove_and_rewire")
     if g.is_multigraph() or not g.is_directed():
         raise NotImplementedError("Currently only implemented for DiGraph, "
                                   "see simplify_pss.")
+    nodes, _ = resolve_nodes(g, nodes)
 
-    # can remove without issue / rewiring
-    in_pendants = [node for node in nodes_to_remove_and_rewire if g.in_degree(node) == 0]
-    out_pendants = [node for node in nodes_to_remove_and_rewire if g.out_degree(node) == 0]
+    h = g.copy() if dry_run else g
+    reasons = {}
+    changed = set()  # (u, v) edges added or changed
 
-    for node in (remaining_nodes_to_remove := nodes_to_remove_and_rewire - set(in_pendants + out_pendants)):
-        new_edges = []
-        upstream = {}
-        downstream = {}
-        failed_reasons = {}
+    for node in dict.fromkeys(nodes):
+        upstream = [u for u in h.predecessors(node) if u != node and _propagates(h[u][node])]
+        downstream = [v for v in h.successors(node) if v != node and _propagates(h[node][v])]
+        new_edges = [(u, v, _rewired_edge(h[u][node], h[node][v], node))
+                     for u in upstream for v in downstream if u != v]
 
-        for upstream_node in g.predecessors(node):
+        h.remove_node(node)
+        for u, v, data in new_edges:
+            if h.has_edge(u, v):
+                data = _merge_edge_data([h[u][v], data])
+                h[u][v].clear()
+            h.add_edge(u, v, **data)
+            changed.add((u, v))
+        reasons[node] = "rewired" if new_edges else "nothing to rewire"
 
-            if upstream_node in nodes_to_remove_and_rewire:
-                failed_reasons[upstream_node] = "To be removed"
-                upstream[upstream_node] = None
-                continue
-
-            e = g[upstream_node][node]
-
-            # if binding interaction, only keep if this is the complex forming interaction
-            # (partner -> complex, target_role "product"), not the mutual partner <-> partner one
-            if e["reaction_type"] == "binding/oligomerisation":
-                if e["target_role"] != "product":
-                    failed_reasons[upstream_node] = "Not propagating binding"
-                    continue
-
-            upstream[upstream_node] = generate_dict()
-            upstream[upstream_node]["node_type"] = g.nodes()[upstream_node]['node_type']
-            upstream[upstream_node]["reaction_id"].append(e["reaction_id"])
-            upstream[upstream_node]["reaction_type"].append(e["reaction_type"])
-            upstream[upstream_node]["reaction_effect"].append(e["reaction_effect"])
-            upstream[upstream_node]["interaction"].append(e["interaction"])
-
-        for downstream_node in g.successors(node):
-
-            if downstream_node in nodes_to_remove_and_rewire:
-                failed_reasons[downstream_node] = "To be removed"
-                downstream[downstream_node] = None
-                continue
-
-            e = g[node][downstream_node]
-
-
-
-
-            downstream[downstream_node] = generate_dict()
-            downstream[downstream_node]["node_type"] = g.nodes()[downstream_node]['node_type']
-            downstream[downstream_node]["reaction_id"].append(e["reaction_id"])
-            downstream[downstream_node]["reaction_type"].append(e["reaction_type"])
-            downstream[downstream_node]["reaction_effect"].append(e["reaction_effect"])
-            downstream[downstream_node]["interaction"].append(e["interaction"])
-
-            if downstream_node in nodes_to_remove_and_rewire:
-                failed_reasons[downstream_node] = "To be removed"
-
-        for source in set(upstream):
-            if source in nodes_to_remove_and_rewire:
-                continue
-
-            for target in set(downstream):
-                if target in nodes_to_remove_and_rewire:
-                    continue
-
-                if source == target:
-                    failed_reasons[target] = "Same source/target"
-                    failed_reasons[source] = "Same source/target"
-                    continue
-
-                data = {
-                    "reaction_id": ",".join(downstream[target]["reaction_id"] + upstream[source]["reaction_id"]),
-                    "reaction_type": unique_item(downstream[target]["reaction_type"] + upstream[source]["reaction_type"])[0],
-                    "reaction_effect": unique_item(downstream[target]["reaction_effect"] + upstream[source]["reaction_effect"])[0],
-                    "interaction": unique_item(downstream[target]["interaction"] + upstream[source]["interaction"])[0],
-                    "note": f"rewired {node} from {source} to {target}",
-                }
-                new_edges.append((source, target, data))
-
-        all_new_edges += new_edges
-
-        # print out any issues:
-        if len(new_edges) == 0:
-            # test if theres a problem
-            if upstream == downstream:
-                # don't need to connect self - no problem
-                continue
-
-            print(node)
-            for n in downstream:
-                if n in failed_reasons:
-                    print(f"  Downstream: {n} -- {failed_reasons[n]}")
-                else:
-                    print(f"  Downstream {n}")
-            print("     --->")
-            for n in upstream:
-                if n in failed_reasons:
-                    print(f"  Upstream: {n} -- {failed_reasons[n]}")
-                else:
-                    print(f"  Upstream {n}")
-            print()
+    changed = sorted((u, v) for u, v in changed if h.has_edge(u, v))
+    logger.info("Removed %d nodes, added or changed %d edges.", len(reasons), len(changed))
 
     if dry_run:
-        print("End of dry run.")
-        return
-
-    og_size_n = g.number_of_nodes()
-    og_size_e = g.number_of_edges()
-
-    g.remove_nodes_from(in_pendants)
-    g.remove_nodes_from(out_pendants)
-    step1_size_n = g.number_of_nodes()
-    step1_size_e = g.number_of_edges()
-    print(f"Removed {og_size_n - step1_size_n} pendant nodes, with {og_size_e - step1_size_e} edges.")
-
-    g.remove_nodes_from(remaining_nodes_to_remove)
-    step2_size_n = g.number_of_nodes()
-    step2_size_e = g.number_of_edges()
-    print(f"Removed further {step1_size_n - step2_size_n} nodes, with {step1_size_e - step2_size_e} edges.")
-
-    g.add_edges_from(all_new_edges)
-    step3_size_e = g.number_of_edges()
-    print(f"Added {step3_size_e - step2_size_e} edges in rewiring")
+        return [(u, v, h[u][v]) for u, v in changed]
+    return reasons
 
 
 def remove_duplicated_binding_edges(g):
@@ -710,8 +696,12 @@ def remove_duplicated_binding_edges(g):
     g : networkx.DiGraph or networkx.MultiDiGraph
         PSS interaction network or gene network (not the reaction graph; each parallel edge
         of a multigraph is considered separately). Changed in place.
-    '''
 
+    Returns
+    -------
+    list
+        The removed edges, ``(u, v)`` or, for a multigraph, ``(u, v, key)``.
+    '''
     _check_not_reaction_graph(g, "remove_duplicated_binding_edges")
     is_multi = g.is_multigraph()
 
@@ -725,27 +715,21 @@ def remove_duplicated_binding_edges(g):
 
     edges_to_remove = set()
     for node in g.nodes():
-
-        # does not matter if we check upstream or downstream first
         for upstream_node in g.predecessors(node):
             for u_key, e in edge_items(upstream_node, node):
-                if e["reaction_type"] != "binding/oligomerisation":
+                if e.get("reaction_type") != "binding/oligomerisation":
                     continue
-
-                # check if it is also downstream
+                # the same reaction in the other direction
                 for d_key, e2 in edge_items(node, upstream_node):
-                    if e2["reaction_id"] != e["reaction_id"]:
+                    if e2.get("reaction_id") != e.get("reaction_id"):
                         continue
-
                     forward = (upstream_node, node, u_key) if is_multi else (upstream_node, node)
                     reverse = (node, upstream_node, d_key) if is_multi else (node, upstream_node)
+                    # keep the "first" one: don't remove both
                     if reverse not in edges_to_remove:
-                        edges_to_remove.add(forward) # keep this "first" one, but make sure we're not removing both!
+                        edges_to_remove.add(forward)
 
-
-    og_size_e = g.number_of_edges()
-
+    edges_to_remove = sorted(edges_to_remove, key=str)
     g.remove_edges_from(edges_to_remove)
-
-    now_size = g.number_of_edges()
-    print(f"Removed {og_size_e - now_size} edges from network.")
+    logger.info("Removed %d edges from the network.", len(edges_to_remove))
+    return edges_to_remove

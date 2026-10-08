@@ -9,9 +9,6 @@ STYLE_XML = "skm-styles.xml"
 BUILTIN_STYLES = {
     "skm": "SKM",                       # CKN, PSS interaction network, PSS gene networks
     "skm-reactions": "SKM-reactions",   # PSS reaction graph
-    # older names, for existing notebooks
-    "pss": "SKM",
-    "ckn": "SKM",
 }
 
 

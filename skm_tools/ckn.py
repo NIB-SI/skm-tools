@@ -1,14 +1,23 @@
 '''CKN (Comprehensive Knowledge Network): load and filter.'''
 
-from collections import defaultdict
+import logging
+from collections import Counter
 from pathlib import Path
-from urllib.request import urlretrieve
 
 import networkx as nx
-import pandas as pd
 
-from .skm_download_urls import CKN_EDGE_URL, CKN_NODE_URL
-from .utils import remove_isolate_nodes
+from .skm_download_urls import CKN_EDGE_FILE, CKN_EDGE_URL, CKN_NODE_FILE, CKN_NODE_URL
+from .utils import as_list, download_if_missing, read_skm_table, remove_isolate_nodes
+
+logger = logging.getLogger(__name__)
+
+# CKN files (v2.0.1): the format of the PSS exports (see skm_tools.utils.read_skm_table)
+_CKN_LIST_COLUMNS = {"synonyms", "mapman", "tissue", "interactionSources"}
+_CKN_BOOL_COLUMNS = {"directed"}
+_CKN_INT_COLUMNS = {"rank", "isTFregulation"}
+
+CKN_RANKS = (0, 1, 2, 3, 4)
+'''The CKN edge ranks, from 0 (curated, from PSS) to 4 (only predicted).'''
 
 
 # ---------------------------------------------------------------------------
@@ -18,82 +27,58 @@ from .utils import remove_isolate_nodes
 def ckn_to_networkx(
         edge_path=None,
         node_path=None,
-        add_reciprocal_edges=True,
-        directed=False,
-        create_using=nx.DiGraph
+        as_directed=True,
+        create_using=nx.DiGraph,
+        data_dir=".",
     ):
-    ''' Load CKN to a networkx directed graph, including node attributes.
+    ''' Load CKN (v2.0.1) to a networkx directed graph, including node attributes.
 
     Downloads the CKN files from skm.nib.si if they don't exist yet.
 
     Parameters
     ----------
-    edge_path : str or pathlib.Path
-        Path to the edge list file (tab-separated, optionally gzipped);
-        if the file does not exist, it is downloaded from skm.nib.si (gzipped, with a
-        ``.tsv.gz`` suffix).
-    node_path : str or pathlib.Path
-        Path to the node annotation file; downloaded as for `edge_path`.
-    add_reciprocal_edges : bool
-        Add the reverse of undirected edges (``directed`` False), so directed path
-        searches can use them in both directions (default True). Not meant to be used
-        together with `directed`. For example A -> B (undirected) becomes A -> B and B -> A.
-    directed : bool
-        Remove undirected edges, and the nodes left without edges (default False).
+    edge_path : str or pathlib.Path, optional
+        Path to the edge file (default ``<data_dir>/AtCKN-v2.0.1-2026.10.tsv.gz``); if the
+        file does not exist, it is downloaded from skm.nib.si, gzipped if the name ends in
+        ``.gz``.
+    node_path : str or pathlib.Path, optional
+        Path to the node file (default ``<data_dir>/AtCKN-v2.0.1-2026.10_node-annot.tsv.gz``);
+        downloaded as for `edge_path`.
+    as_directed : bool
+        Add undirected edges (``directed`` False, e.g. binding) in both directions, so
+        directed path searches can use them either way (default True): A -> B (undirected)
+        becomes A -> B and B -> A. If False, every edge is added once, as listed in the file.
+        To leave out the undirected edges, use
+        ``filter_ckn_edges(g, filter_function=lambda d: d["directed"])``.
     create_using : networkx graph class
         Graph class to create (default ``networkx.DiGraph``; ``networkx.MultiDiGraph``
         keeps parallel edges).
+    data_dir : str or pathlib.Path
+        Folder for the default file names (default: the current folder).
 
     Returns
     -------
     networkx.DiGraph
-        CKN (or the `create_using` type), in the CKN v2.0.1 format: node attributes
-        ``node_type`` (the PSS class, e.g. ``PlantCoding``, ``Metabolite``), ``locus_type``
-        (genes and RNAs: the TAIR locus type, e.g. ``protein_coding``, ``mirna``),
-        ``species``, ``TAIR``, ``display_label``, ``short_name``, ``synonyms``,
-        ``description``, ``mapman``, ``note`` and ``tissue``; edge attributes ``interaction``
-        (``positive-influence``, ``negative-influence`` or ``unknown-influence``), ``directed``,
-        ``rank``, ``effect``, ``type``, ``species``, ``isTFregulation`` and ``interactionSources``.
-        ``synonyms``, ``mapman``, ``tissue`` and ``interactionSources`` are lists; empty values
-        are None.
-
-    Notes
-    -----
-    Files in the older CKN v2 format (``node_ID``, ``GMM``, ``full_name``, ``isDirected``, ...)
-    are converted to the v2.0.1 attributes when loaded, and so are older node types
-    (``protein_coding``, ``metabolite``, ``biotic``, ...): to the PSS class, with the locus
-    type of genes and RNAs in ``locus_type``.
+        CKN (or the `create_using` type): node attributes ``node_type`` (the PSS class,
+        e.g. ``PlantCoding``, ``Metabolite``), ``locus_type`` (genes and RNAs: the TAIR locus
+        type, e.g. ``protein_coding``, ``mirna``), ``species``, ``TAIR``, ``display_label``,
+        ``short_name``, ``synonyms``, ``description``, ``mapman``, ``note`` and ``tissue``; edge
+        attributes ``interaction`` (``positive-influence``, ``negative-influence`` or
+        ``unknown-influence``), ``directed``, ``rank``, ``effect``, ``type``, ``species``,
+        ``isTFregulation`` and ``interactionSources``. ``synonyms``, ``mapman``, ``tissue`` and
+        ``interactionSources`` are lists; empty values are None. Nodes of the node file
+        without edges are left out.
     '''
-    edge_path = Path(edge_path)
-    node_path = Path(node_path)
+    data_dir = Path(data_dir)
+    edge_path = Path(edge_path) if edge_path is not None else data_dir / CKN_EDGE_FILE
+    node_path = Path(node_path) if node_path is not None else data_dir / CKN_NODE_FILE
 
-    if not edge_path.exists() and edge_path.suffix != '.gz':
-        edge_path = edge_path.with_suffix(".tsv.gz")
-    if not edge_path.exists():
-        print(f"Attempting to download the edge list to {edge_path}.", end=" ")
-        urlretrieve(CKN_EDGE_URL, edge_path)
-        print("Success.")
-
-    if not node_path.exists() and node_path.suffix != '.gz':
-        node_path = node_path.with_suffix(".tsv.gz")
-    if not node_path.exists():
-        print(f"Attempting to download the node annotations to {node_path}.", end=" ")
-        urlretrieve(CKN_NODE_URL, node_path)
-        print("Success.")
-
-    edge_df = _read_ckn_table(edge_path)
-    node_df = _read_ckn_table(node_path)
-    if "node_ID" in node_df.columns:
-        node_df, edge_df = _ckn_v2_to_v2_0_1(node_df, edge_df)
+    edge_df = read_skm_table(download_if_missing(edge_path, CKN_EDGE_URL),
+                             _CKN_LIST_COLUMNS, _CKN_BOOL_COLUMNS, _CKN_INT_COLUMNS)
+    node_df = read_skm_table(download_if_missing(node_path, CKN_NODE_URL), _CKN_LIST_COLUMNS)
     if "locus_type" not in node_df.columns:
-        node_df = _ckn_pss_node_types(node_df)
-
-    for df in (node_df, edge_df):
-        for c in _CKN_LIST_COLUMNS.intersection(df.columns):
-            df[c] = df[c].map(lambda x: [y.strip() for y in x.split("|")] if x is not None else None)
-    for c in ("rank", "isTFregulation"):
-        edge_df[c] = edge_df[c].map(lambda x: int(x) if x is not None else None)
-    edge_df["directed"] = edge_df["directed"].map({"True": True, "False": False})
+        raise ValueError(f"{node_path} is not a CKN v2.0.1 node file (no locus_type column); "
+                         "older CKN versions are not supported.")
 
     g = create_using()
     g.add_edges_from(
@@ -102,102 +87,20 @@ def ckn_to_networkx(
     node_df = node_df.set_index("id")
     nx.set_node_attributes(g, node_df[node_df.index.isin(g.nodes)].to_dict('index'))
 
-    if add_reciprocal_edges:
-        edges_to_add = []
-        for u, v, data in g.edges(data=True):
-            if (not data["directed"]) and (not g.has_edge(v, u)):
-                edges_to_add.append((v, u, data))
-        _ = g.add_edges_from(edges_to_add)
-
-    if directed:
-        to_remove = [(u, v) for u, v, d in g.edges(data=True) if not d["directed"]]
-        g.remove_edges_from(to_remove)
-
-        # remove isolates resulting from filtering
-        isolates = list(nx.isolates(g))
-        g.remove_nodes_from(isolates)
+    if as_directed:
+        reverse = [(v, u, data) for u, v, data in g.edges(data=True)
+                   if data["directed"] is False and not g.has_edge(v, u)]
+        g.add_edges_from(reverse)
 
     return g
-
-
-# CKN files: tab-separated, header, lists joined with "|", empty = no value
-_CKN_LIST_COLUMNS = {"synonyms", "mapman", "tissue", "interactionSources"}
-
-# CKN v2 effect -> v2.0.1 interaction (anything else is an unknown influence)
-_CKN_EFFECT_TO_INTERACTION = {"act": "positive-influence", "inh": "negative-influence"}
-
-# older node_type (TAIR locus types and CKN's own) -> PSS class, as in CKN v2.0.1
-# (skm-ckn scripts/ckn_v2.0.1.py); the locus types of genes and RNAs are kept as locus_type
-_CKN_LOCUS_TYPES = {
-    "protein_coding": "PlantCoding", "transposable_element_gene": "PlantCoding",
-    "pseudogene": "PlantPseudogene",
-    "mirna": "PlantNonCoding", "antisense_long_noncoding_rna": "PlantNonCoding",
-    "pre_trna": "PlantNonCoding", "other_rna": "PlantNonCoding",
-    "small_nuclear_rna": "PlantNonCoding", "small_nucleolar_rna": "PlantNonCoding",
-}
-_CKN_OTHER_TYPES = {
-    "metabolite": "Metabolite", "complex": "Complex", "process": "Process", "abiotic": "ForeignAbiotic",
-}
-# biotic nodes, by id, with the classes of these entities in PSS
-_CKN_BIOTIC = {
-    **dict.fromkeys(["bacteria_flg22", "virus_6K2", "virus_CI", "virus_CP", "virus_HC-Pro",
-                     "virus_NIa-Pro", "virus_NIb", "virus_P1", "virus_P3", "virus_VPg"], "ForeignCoding"),
-    **dict.fromkeys(["bacteria", "virus_PVY"], "ForeignEntity"),
-    **dict.fromkeys(["virus_dsRNA", "virus_vsiRNA", "virus_me-vsiRNA"], "ForeignNonCoding"),
-}
-
-
-def _read_ckn_table(path):
-    '''Read a CKN file (optionally gzipped) to a DataFrame of str, with None for empty.'''
-    # "N/A" is the empty species of metabolites in the CKN v2 node file
-    df = pd.read_csv(path, sep="\t", dtype=str, keep_default_na=False, na_values=["", "N/A"])
-    return df.astype(object).where(df.notna(), None)
-
-
-def _ckn_v2_to_v2_0_1(node_df, edge_df):
-    '''Convert CKN v2 tables (AtCKN-v2-2023.06) to the v2.0.1 columns.'''
-    node_df = node_df.rename(columns={"node_ID": "id", "full_name": "description", "GMM": "mapman"})
-    # v2 joined tissues with ","
-    node_df["tissue"] = node_df["tissue"].map(lambda x: x.replace(",", "|") if x is not None else None)
-    node_df["display_label"] = [s if s is not None else i for s, i in zip(node_df["short_name"], node_df["id"])]
-
-    edge_df = edge_df.rename(columns={"isDirected": "directed"})
-    edge_df["directed"] = edge_df["directed"].map({"1": "True", "0": "False"})
-    edge_df["interaction"] = edge_df["effect"].map(lambda x: _CKN_EFFECT_TO_INTERACTION.get(x, "unknown-influence"))
-
-    return node_df, edge_df
-
-
-def _ckn_pss_node_types(node_df):
-    '''Convert older node types (CKN v2, and v2.0.1 before 2026-10-06) to the PSS classes,
-    with the TAIR locus type of genes and RNAs in a new ``locus_type`` column.'''
-    def convert(node_id, node_type):
-        if node_type in _CKN_LOCUS_TYPES:
-            return _CKN_LOCUS_TYPES[node_type], node_type
-        if node_type in _CKN_OTHER_TYPES:
-            return _CKN_OTHER_TYPES[node_type], None
-        if node_type == "biotic" and node_id in _CKN_BIOTIC:
-            return _CKN_BIOTIC[node_id], None
-        raise ValueError(f"No PSS class for CKN node {node_id} (node_type {node_type}).")
-
-    converted = [convert(i, t) for i, t in zip(node_df["id"], node_df["node_type"])]
-    node_df = node_df.copy()
-    node_df["node_type"] = [c for c, _ in converted]
-    # object dtype, so None stays None (pandas 3 would make a str column with NaN)
-    node_df.insert(node_df.columns.get_loc("node_type") + 1, "locus_type",
-                   pd.Series([l for _, l in converted], index=node_df.index, dtype=object))
-    return node_df
 
 
 # ---------------------------------------------------------------------------
 # Filtering
 # ---------------------------------------------------------------------------
 
-ckn_ranks = [0, 1, 2, 3, 4]
-
-
 def rank_counts(g):
-    '''Count (and print) the edges of each CKN rank.
+    '''The number of edges of each CKN rank.
 
     Parameters
     ----------
@@ -206,17 +109,13 @@ def rank_counts(g):
 
     Returns
     -------
-    collections.defaultdict
-        Rank -> number of edges. Edges without a ``rank`` attribute are not counted.
+    dict
+        Rank -> number of edges, for every rank in :data:`CKN_RANKS` (and any other rank
+        in `g`). Edges without a ``rank`` are not counted.
     '''
-    counts = defaultdict(int)
-    for _, _, data in g.edges(data=True):
-        if 'rank' in data:
-            counts[data['rank']] += 1
-    for i in range(len(ckn_ranks)):
-        print(f"rank {i}:\t {counts[i]:,}")
+    counts = Counter(d["rank"] for *_, d in g.edges(data=True) if d.get("rank") is not None)
+    return {r: counts[r] for r in sorted(set(CKN_RANKS) | set(counts))}
 
-    return counts
 
 def filter_ckn_edges(g,
                      keep_edge_ranks=None,
@@ -231,48 +130,45 @@ def filter_ckn_edges(g,
     ----------
     g : networkx.Graph
         CKN, e.g. from :func:`ckn_to_networkx`. Changed in place.
-    keep_edge_ranks : int or list of int, optional
+    keep_edge_ranks : int or iterable of int, optional
         Keep only edges of these ranks (0: best supported, to 4). Edges without a
         ``rank`` attribute are kept.
-    keep_edge_types : str or list of str, optional
+    keep_edge_types : str or iterable of str, optional
         Keep only edges of these ``type`` values (e.g. ``"binding"``).
     filter_function : callable, optional
         Called with each edge's attribute dict; return True to keep the edge.
     remove_isolates : bool
-        Also remove nodes left without edges (default True).
+        Also remove nodes without edges afterwards (default True); this includes nodes that
+        had no edges before.
+
+    Returns
+    -------
+    removed_edges : list
+        The removed edges, ``(u, v)`` or, for a multigraph, ``(u, v, key)``.
+    removed_nodes : dict
+        Removed node -> ``"isolate"``.
     '''
-    # / easier in reverse, but less intuitive...
-    og_size = g.number_of_edges()
+    keep_edge_ranks = as_list(keep_edge_ranks)
+    keep_edge_types = as_list(keep_edge_types)
 
-    to_remove = set()
+    def keep(d):
+        if keep_edge_ranks is not None and d.get("rank") is not None and d["rank"] not in keep_edge_ranks:
+            return False
+        if keep_edge_types is not None and d.get("type") not in keep_edge_types:
+            return False
+        return filter_function is None or filter_function(d)
 
-    if isinstance(keep_edge_ranks, int):
-        keep_edge_ranks = [keep_edge_ranks]
+    if g.is_multigraph():
+        removed_edges = [(u, v, k) for u, v, k, d in g.edges(keys=True, data=True) if not keep(d)]
+    else:
+        removed_edges = [(u, v) for u, v, d in g.edges(data=True) if not keep(d)]
+    g.remove_edges_from(removed_edges)
 
-    if isinstance(keep_edge_types, str):
-        keep_edge_types = [keep_edge_types]
+    removed_nodes = remove_isolate_nodes(g) if remove_isolates else {}
 
-    if isinstance(keep_edge_ranks, list):
-        to_remove = [(u, v) for u, v, d in g.edges(data=True, )
-                     if 'rank' in d and not (d["rank"] in keep_edge_ranks)]
-        g.remove_edges_from(to_remove)
-
-    if isinstance(keep_edge_types, list):
-        to_remove = [(u, v) for u, v, d in g.edges(data=True, )
-                     if not (d["type"] in keep_edge_types)]
-        g.remove_edges_from(to_remove)
-
-    if filter_function is not None:
-        to_remove = ([(u, v) for u, v, d in g.edges(data=True)
-                      if not filter_function(d)])
-        g.remove_edges_from(list(to_remove))
-
-    # remove isolates due to filtering
-    if remove_isolates:
-        isolate_reasons = remove_isolate_nodes(g)
-
-    now_size = g.number_of_edges()
-    print(f"Removed {og_size - now_size} edges from network.")
+    logger.info("Removed %d edges and %d nodes from the network.",
+                len(removed_edges), len(removed_nodes))
+    return removed_edges, removed_nodes
 
 
 def filter_ckn_nodes(g,
@@ -282,22 +178,26 @@ def filter_ckn_nodes(g,
                      remove_isolates=True):
     '''Remove CKN nodes, in place.
 
-    Complexes with a removed component are removed too.
+    Complexes with a removed component are removed too: if a component is removed, the
+    complex can't exist.
 
     Parameters
     ----------
     g : networkx.Graph
         CKN, e.g. from :func:`ckn_to_networkx`. Changed in place.
-    node_types : list of str, optional
+    node_types : str or iterable of str, optional
         Keep only nodes of these ``node_type`` values (the PSS classes, e.g. ``"PlantCoding"``,
         ``"Metabolite"``).
-    species : list of str, optional
-        Keep only nodes of these species (e.g. ``["ath"]``); nodes without a species
-        (e.g. metabolites) are kept.
-    tissues : list of str, optional
+    species : str or iterable of str, optional
+        Keep only nodes of these species (e.g. ``"ath"``); nodes without a species
+        (e.g. metabolites) are kept. Complexes of an Arabidopsis protein and a pathogen
+        (species ``"ath/foreign"``, e.g. ``RISC|virus_vsiRNA``) are removed with
+        ``species="ath"``, as their foreign component is.
+    tissues : str or iterable of str, optional
         Keep only nodes annotated with at least one of these tissues.
     remove_isolates : bool
-        Also remove nodes left without edges (default True).
+        Also remove nodes without edges afterwards (default True); this includes nodes that
+        had no edges before.
 
     Returns
     -------
@@ -305,140 +205,37 @@ def filter_ckn_nodes(g,
         Removed node -> reason (``"wrong species"``, ``"wrong node type"``,
         ``"wrong tissue type"``, ``"complex component removed"`` or ``"isolate"``).
     '''
+    node_types = as_list(node_types)
+    species = as_list(species)
+    tissues = as_list(tissues)
     og_size = g.number_of_nodes()
-
-    to_remove = set()
     reasons = {}
 
     if species:
-        no_species = [
-            n for n, data in g.nodes(data=True)
-            # missing requested species
-            if not (data['species'] in species)
-            # but not a "nan" species (e.g. metabolites)
-            and data['species'] is not None
-        ]
-        to_remove.update(no_species)
-        reasons = {
-            **reasons,
-            **{
-                n: "wrong species"
-                for n in no_species if not n in reasons
-            }
-        }
+        # nodes without a species (e.g. metabolites) are kept
+        reasons.update({n: "wrong species" for n, data in g.nodes(data=True)
+                        if data.get("species") is not None and data["species"] not in species})
 
     if node_types:
-        # nodes not in keep_types
-        wrong_type = [
-            n for n, data in g.nodes(data=True)
-            if not (data['node_type'] in node_types)
-        ]
-        to_remove.update(wrong_type)
-        reasons = {
-            **reasons,
-            **{
-                n: "wrong node type"
-                for n in wrong_type if not n in reasons
-            }
-        }
+        reasons.update({n: "wrong node type" for n, data in g.nodes(data=True)
+                        if n not in reasons and data.get("node_type") not in node_types})
 
     if tissues:
-        wrong_tissue = [
-            n for n, data in g.nodes(data=True) if (not data['tissue']) or (
-                not (len([aa for aa in data['tissue'] if aa in tissues]) > 0))
-        ]
-        to_remove.update(wrong_tissue)
-        reasons = {
-            **reasons,
-            **{
-                n: "wrong tissue type"
-                for n in wrong_tissue if not n in reasons
-            }
-        }
+        reasons.update({n: "wrong tissue type" for n, data in g.nodes(data=True)
+                        if n not in reasons
+                        and not any(t in tissues for t in (data.get("tissue") or []))})
 
-    # now remove complexes that contain any nodes to be removed entities
-    as_components = []
-    for n in to_remove:
-        x = g.nodes(data=True)[n]
-        if isinstance(x["short_name"], str):
-            as_components.append(x['short_name'])
-        else:
-            as_components.append(n)
+    # complexes containing a removed node: CKN complex ids are their components' short
+    # names (or ids), joined with "|"
+    removed_names = {g.nodes[n].get("short_name") or n for n in reasons}
+    reasons.update({n: "complex component removed" for n in g.nodes()
+                    if n not in reasons and isinstance(n, str)
+                    and removed_names.intersection(n.split("|"))})
 
-    def complex_to_remove(x):
-        for n in x.split("|"):
-            if n in as_components:
-                return True
+    g.remove_nodes_from(list(reasons))
 
-    complex_component_missing = [n for n in g.nodes() if complex_to_remove(n)]
-    to_remove.update(complex_component_missing)
-    reasons = {
-        **reasons,
-        **{
-            n: "complex component removed"
-            for n in complex_component_missing if not n in reasons
-        }
-    }
-
-    # remove the nodes
-    g.remove_nodes_from(to_remove)
-
-    # remove isolates due to filtering
     if remove_isolates:
-        isolate_reasons = remove_isolate_nodes(g)
-        reasons = {**reasons, **{n:r for n, r in isolate_reasons.items() if not n in reasons}}
+        reasons.update({n: r for n, r in remove_isolate_nodes(g).items() if n not in reasons})
 
-    now_size = g.number_of_nodes()
-    print(f"Removed {og_size - now_size} nodes from network.")
-
+    logger.info("Removed %d nodes from the network.", og_size - g.number_of_nodes())
     return reasons
-
-
-def to_graph_tool(g):
-    """Convert a networkx graph to a graph-tool graph (structure only, no attributes).
-
-    Requires graph-tool (https://graph-tool.skewed.de), which is not a dependency of
-    skm-tools. Based on https://bbengfort.github.io/2016/06/graph-tool-from-networkx/.
-
-    Parameters
-    ----------
-    g : networkx.Graph
-
-    Returns
-    -------
-    gtG : graph_tool.Graph
-        With a vertex property ``id`` holding the networkx node id as a string.
-    vertices : dict
-        networkx node -> graph-tool vertex.
-    """
-
-    import graph_tool as gt
-
-    # Phase 0: Create a directed or undirected graph-tool Graph
-    gtG = gt.Graph(directed=g.is_directed())
-
-    # Also add the node id: in NetworkX a node can be any hashable type, but
-    # in graph-tool node are defined as indices. So we capture any strings
-    # in a special PropertyMap called 'id' -- modify as needed!
-    gtG.vertex_properties['id'] = gtG.new_vertex_property('string')
-
-    # Phase 2: Actually add all the nodes and vertices with their properties
-    # Add the nodes
-    vertices = {}  # vertex mapping for tracking edges later
-    for node, data in g.nodes(data=True):
-
-        # Create the vertex and annotate for our edges later
-        v = gtG.add_vertex()
-        vertices[node] = v
-
-        # Set the vertex properties, not forgetting the id property
-        gtG.vp["id"][v] = str(node)
-
-    # Add the edges
-    for src, dst, data in g.edges(data=True):
-
-        # Look up the vertex structs from our vertices mapping and add edge.
-        e = gtG.add_edge(vertices[src], vertices[dst])
-
-    # Done, finally!
-    return gtG, vertices

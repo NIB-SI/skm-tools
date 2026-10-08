@@ -1,6 +1,6 @@
 '''Neighbourhoods of nodes of interest.'''
 
-from .utils import to_node_list
+from .utils import resolve_nodes
 
 
 _DIRECTIONS = ("both", "out", "in")
@@ -14,9 +14,10 @@ def neighborhood_nodes(g, nodes, depth=1, direction="both"):
     g : networkx.Graph
         Graph to search.
     nodes : node or iterable of nodes
-        Start node(s). Nodes not in `g` are ignored.
-    depth : int
-        Number of steps to expand (default 1: first neighbours).
+        Start node(s). Nodes not in `g` are ignored, with a warning.
+    depth : int or None
+        Number of steps to expand: a positive integer (default 1: first neighbours), or
+        None for no limit (everything reachable).
     direction : {"both", "out", "in"}
         For directed graphs: follow edges in both directions (default, as an undirected
         graph), only downstream (successors), or only upstream (predecessors).
@@ -37,8 +38,8 @@ def neighborhood_nodes(g, nodes, depth=1, direction="both"):
     '''
     if direction not in _DIRECTIONS:
         raise ValueError(f"direction must be one of {_DIRECTIONS}, not {direction!r}.")
-    if depth < 0:
-        raise ValueError("depth must be >= 0.")
+    if depth is not None and (isinstance(depth, bool) or not isinstance(depth, int) or depth < 1):
+        raise ValueError(f"depth must be a positive integer or None (no limit), not {depth!r}.")
 
     def step(n):
         if not g.is_directed():
@@ -49,9 +50,11 @@ def neighborhood_nodes(g, nodes, depth=1, direction="both"):
             return g.predecessors(n)
         return list(g.successors(n)) + list(g.predecessors(n))
 
-    distances = {n: 0 for n in to_node_list(nodes) if n in g}
+    distances = dict.fromkeys(resolve_nodes(g, nodes)[0], 0)
     frontier = list(distances)
-    for d in range(1, depth + 1):
+    d = 0
+    while frontier and (depth is None or d < depth):
+        d += 1
         next_frontier = []
         for n in frontier:
             for m in step(n):
@@ -59,13 +62,11 @@ def neighborhood_nodes(g, nodes, depth=1, direction="both"):
                     distances[m] = d
                     next_frontier.append(m)
         frontier = next_frontier
-        if not frontier:
-            break
 
     return distances
 
 
-def get_neighborhood(g, nodes, depth=1, direction="both", induced=True):
+def get_neighborhood(g, nodes, depth=1, direction="both", induced=True, distance_attr="distance"):
     '''Subgraph of `g` around `nodes` (a copy).
 
     Parameters
@@ -73,9 +74,9 @@ def get_neighborhood(g, nodes, depth=1, direction="both", induced=True):
     g : networkx.Graph
         Graph to search.
     nodes : node or iterable of nodes
-        Start node(s). Nodes not in `g` are ignored.
-    depth : int
-        Number of steps to expand (default 1: first neighbours).
+        Start node(s). Nodes not in `g` are ignored, with a warning.
+    depth : int or None
+        Number of steps to expand (default 1: first neighbours; None: no limit).
     direction : {"both", "out", "in"}
         For directed graphs: follow edges in both directions (default), only downstream,
         or only upstream. See :func:`neighborhood_nodes`.
@@ -84,12 +85,15 @@ def get_neighborhood(g, nodes, depth=1, direction="both", induced=True):
         If False, only the edges followed while expanding (each node reached through
         the edges from the previous step), so e.g. two second neighbours that happen to
         interact aren't linked.
+    distance_attr : str or None
+        Node attribute for each node's number of steps from the closest start node
+        (default ``"distance"``; None: don't add it).
 
     Returns
     -------
     networkx.Graph
-        Same type as `g`, with node and edge attributes. Every node gets a ``distance``
-        attribute: its number of steps from the closest start node.
+        Same type as `g`, with node and edge attributes, and the distances (see
+        `distance_attr`).
 
     Examples
     --------
@@ -113,15 +117,18 @@ def get_neighborhood(g, nodes, depth=1, direction="both", induced=True):
                 return distances[v] == distances[u] + 1
             return distances[u] == distances[v] + 1
 
+        # the edges of the nodes found (directed: their out-edges, which include every
+        # edge between them)
         if g.is_multigraph():
-            edges = [(u, v, k) for u, v, k in g.edges(keys=True) if followed(u, v)]
+            edges = [(u, v, k) for u, v, k in g.edges(list(distances), keys=True) if followed(u, v)]
         else:
-            edges = [(u, v) for u, v in g.edges() if followed(u, v)]
+            edges = [(u, v) for u, v in g.edges(list(distances)) if followed(u, v)]
         h = g.edge_subgraph(edges).copy()
         # keep the start nodes even if they have no edges
         h.add_nodes_from((n, g.nodes[n]) for n, d in distances.items() if d == 0)
 
-    for n in h:
-        h.nodes[n]["distance"] = distances[n]
+    if distance_attr is not None:
+        for n in h:
+            h.nodes[n][distance_attr] = distances[n]
 
     return h

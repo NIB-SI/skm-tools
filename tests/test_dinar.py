@@ -26,7 +26,7 @@ TEXT = ["shortDescription", "shortName", "MapManBin"]
 def test_node_columns():
     nodes, _ = to_dinar(_graph())
     assert list(nodes.columns) == [
-        "geneID", "shortDescription", "shortName", "MapManBin", "clusterID", "clusterName",
+        "geneID", "shortDescription", "shortName", "MapManBin", "clusterID",
         "x", "y", "clusterSimplifiedNodeDegree", "expressed",
     ]
     assert nodes.set_index("geneID").loc["AT2G38470", TEXT].tolist() == [
@@ -47,9 +47,9 @@ def test_edges_one_row_per_interaction():
         "clusterSimplifiedNodeDegree_geneID1", "clusterSimplifiedNodeDegree_geneID2", "exists",
     ]
     assert sorted(map(tuple, edges[["geneID1", "geneID2", "reactionType"]].values.tolist())) == [
-        ("AT2G38470", "camalexin", "negative-influence"),
-        ("AT2G38470", "camalexin", "positive-influence"),
-        ("camalexin", "AT2G38470", "-"),
+        ("AT2G38470", "camalexin", "act_influence"),
+        ("AT2G38470", "camalexin", "inh_influence"),
+        ("camalexin", "AT2G38470", "unk_influence"),
     ]
 
 
@@ -65,7 +65,11 @@ def test_gene_network(pss_gene_network_ath_edge_path, pss_gene_network_ath_node_
     g = pss_gene_network_to_networkx(pss_gene_network_ath_edge_path, pss_gene_network_ath_node_path)
     nodes, edges = to_dinar(g)
     assert set(nodes["geneID"]) == set(g.nodes())
-    assert set(edges["reactionType"]) <= {"positive-influence", "negative-influence", "unknown-influence"}
+    # as DiNAR's PSS tables: the sign (act/inh/unk, which DiNAR draws), then the reaction type
+    signs = {"positive-influence": "act", "negative-influence": "inh", "unknown-influence": "unk"}
+    expected = {f"{signs[d['interaction']]}_{d['reaction_type']}" for *_, d in g.edges(data=True)}
+    assert set(edges["reactionType"]) == expected
+    assert "act_protein activation" in expected
     assert set(edges["geneID1"]) | set(edges["geneID2"]) <= set(nodes["geneID"])
 
 
@@ -88,10 +92,11 @@ def test_one_cluster_by_default():
 def test_clusters_from_attribute():
     nodes, _ = to_dinar(_clustered_graph(), clusters="pathway")
     n = nodes.set_index("geneID")
-    # B (4 nodes) is the largest cluster: 1; lists use the first value; no pathway: 0
-    assert n.loc["b1", ["clusterID", "clusterName"]].tolist() == [1, "B"]
-    assert n.loc["a1", ["clusterID", "clusterName"]].tolist() == [2, "A"]
-    assert n.loc["x", ["clusterID", "clusterName"]].tolist() == [0, "-"]
+    # B (4 nodes) is the largest cluster: 1; lists use the first value; no pathway: one more
+    # cluster, last
+    assert n.loc["b1", "clusterID"] == 1
+    assert n.loc["a1", "clusterID"] == 2
+    assert n.loc["x", "clusterID"] == 3
 
 
 def test_cluster_degree_ignores_direction_loops_and_other_clusters():
@@ -108,7 +113,7 @@ def test_clusters_from_mapping():
     clusters = {"a1": "c", "a2": "c", "b1": "d"}
     nodes, _ = to_dinar(_clustered_graph(), clusters=clusters)
     n = nodes.set_index("geneID")["clusterID"]
-    assert n["a1"] == n["a2"] == 1 and n["b1"] == 2 and n["b2"] == 0
+    assert n["a1"] == n["a2"] == 1 and n["b1"] == 2 and n["b2"] == n["x"] == 3
 
 
 def test_positions_from_mapping_and_pos_attribute():
@@ -133,3 +138,49 @@ def test_default_layout_is_reproducible_and_groups_clusters():
 def test_missing_positions_raise():
     with pytest.raises(ValueError, match="No position"):
         to_dinar(_clustered_graph(), positions={"a1": (0, 0)})
+
+
+def test_nodes_without_edges_are_cluster_0():
+    g = _clustered_graph()
+    g.add_node("lonely", pathway="A")
+    nodes, _ = to_dinar(g, clusters="pathway")
+    n = nodes.set_index("geneID")["clusterID"]
+    assert n["lonely"] == 0
+    assert sorted(set(n)) == [0, 1, 2, 3]
+
+
+def test_nan_and_set_cluster_labels():
+    g = _clustered_graph()
+    clusters = {n: float("nan") for n in g} | {"a1": {"Z", "A"}, "a2": ["A"]}
+    n = to_dinar(g, clusters=clusters)[0].set_index("geneID")["clusterID"]
+    # NaN: no cluster (all together), not a cluster each; sets: the first in sorted order
+    assert n["a1"] == n["a2"] == 1
+    assert set(n.drop(["a1", "a2"])) == {2}  # no cluster: together, last
+
+
+def test_text_values():
+    g = nx.DiGraph([("A", "B")])
+    g.nodes["A"]["description"] = "line 1\nline\t2"
+    g.nodes["B"]["description"] = float("nan")
+    nodes, _ = to_dinar(g)
+    assert nodes["shortDescription"].tolist() == ["line 1 line 2", "-"]
+
+
+def test_colliding_ids_raise():
+    with pytest.raises(ValueError, match="same as text"):
+        to_dinar(nx.Graph([(1, "1")]))
+
+
+def test_cluster_edge_limit():
+    g = nx.gnm_random_graph(200, 2001, seed=1, directed=True)
+    with pytest.raises(ValueError, match="more than 2000 edges"):
+        to_dinar(g, positions={n: (0, 0) for n in g})
+    clusters = {n: n % 2 for n in g}
+    to_dinar(g, clusters=clusters, positions={n: (0, 0) for n in g})  # two smaller clusters
+
+
+def test_written_without_quoting(tmp_path):
+    g = nx.DiGraph([("A", "B")])
+    g.nodes["A"]["description"] = 'U2B"-LIKE'
+    write_dinar(g, tmp_path / "nodes.txt", tmp_path / "edges.txt")
+    assert '\tU2B"-LIKE\t' in (tmp_path / "nodes.txt").read_text()

@@ -30,10 +30,12 @@ toolbox is available, and adds functions for the analyses SKM is typically used 
 - **Shortest paths** between sources and targets of interest, directed or undirected
 - **Neighbourhoods** of nodes of interest, to any depth
 - **Minimum cuts** between sets of nodes
+- **Experimental data** (e.g. logFC and p-values) added to the nodes
 - **Translation** of Arabidopsis networks to other species
-- **Saving** networks (pickle, JSON, GraphML) and JSON-safe conversion of graphs and paths
-- **Cytoscape automation:** load, style, highlight, extract subnetworks and export images,
-  through `py4cytoscape <https://py4cytoscape.readthedocs.io>`_. Includes - **experimental data overlay** (e.g. heatmaps with expression logFC and p-values as node annotations)
+- **Saving** networks (pickle, JSON) and JSON-safe conversion of graphs and paths
+- **Cytoscape automation:** load, style, highlight, extract subnetworks, show images and
+  charts (e.g. heatmaps of experimental data) on the nodes, and export images, through
+  `py4cytoscape <https://py4cytoscape.readthedocs.io>`_
 - **DiNAR export:** networks as `DiNAR <https://github.com/NIB-SI/DiNAR>`_ custom networks,
   to show expression data of several conditions on them
 

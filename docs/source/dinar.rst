@@ -4,9 +4,9 @@ DiNAR
 
 `DiNAR <https://github.com/NIB-SI/DiNAR>`_ (Differential Network Analysis in R) shows
 differential expression (or other omics data) of several conditions or time points on a
-prior knowledge network, one cluster of nodes at a time. A PSS gene network, CKN, or a
-subnetwork of either can be used as the knowledge network (as a DiNAR *Custom Network* in
-the form of a nodes table and an edges table).
+prior knowledge network, one cluster of nodes at a time (clusters of at most 2000 edges). A
+PSS gene network, CKN, or a subnetwork of either can be used as the knowledge network (as a
+DiNAR *Custom Network* in the form of a nodes table and an edges table).
 
 From Python
 ===========
@@ -19,15 +19,17 @@ From Python
    from skm_tools.dinar import write_dinar
    from skm_tools.pss import pss_gene_network_to_networkx
 
-   pss_ath = pss_gene_network_to_networkx(
-       "pss-gene-network-ath-edges-public.tsv",
-       "pss-gene-network-ath-nodes-public.tsv",
-   )
+   pss_ath = pss_gene_network_to_networkx(species="ath", data_dir="data")
    write_dinar(pss_ath, "pss-ath-dinar-nodes.txt", "pss-ath-dinar-edges.txt", clusters="pathway")
 
 Nodes get ``shortName`` from ``display_label``, ``shortDescription`` from ``description``
-and ``MapManBin`` from ``mapman`` (see :ref:`mapman`); edges get ``reactionType`` from
-``interaction`` (``positive-influence``, ...). Missing values are ``-``, as DiNAR expects.
+and ``MapManBin`` from ``mapman`` (see :ref:`mapman`), joined with ``" | "``. DiNAR draws an
+edge by the start of its ``reactionType``: ``act`` (activation), ``inh`` (inhibition), or
+anything else (unknown). So, as in DiNAR's own PSS tables, ``reactionType`` is ``act_``,
+``inh_`` or ``unk_``, from the edge's ``interaction`` (positive, negative or unknown
+influence), followed by the PSS ``reaction_type`` (e.g. ``act_protein activation``), or by
+``influence`` for networks without one (CKN). Missing values are ``-``, as DiNAR expects, and
+the columns DiNAR needs but skm-tools has no data for (``expressed``, ``exists``) are 1.
 
 Clusters
 --------
@@ -45,8 +47,11 @@ from community detection:
    clusters = {n: i for i, community in enumerate(communities) for n in community}
    write_dinar(ckn_subnetwork, "nodes.txt", "edges.txt", clusters=clusters)
 
-Without ``clusters``, all nodes will be in one cluster. Nodes without a cluster (e.g.
-without a ``pathway``) get ``clusterID`` 0, which DiNAR doesn't show.
+Without ``clusters``, all nodes are in one cluster, which is fine for small networks (e.g.
+PSS). Nodes without a cluster (e.g. without a ``pathway``) are put together in one more
+cluster. Nodes without edges get ``clusterID`` 0, which DiNAR doesn't show. DiNAR can't
+show clusters with more than 2000 edges: :func:`~skm_tools.dinar.to_dinar` raises a
+``ValueError`` for them, so split large networks into clusters.
 
 Coordinates
 -----------

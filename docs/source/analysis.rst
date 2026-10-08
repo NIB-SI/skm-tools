@@ -9,7 +9,9 @@ Shortest paths
 ==============
 
 :func:`~skm_tools.paths.get_paths` finds the shortest paths from one or more sources to
-one or more targets. Nodes not in the graph, and pairs without a path, are skipped.
+one or more targets. Pairs without a path are skipped, and so are nodes not in the graph,
+with a warning (logged, see :ref:`logging`). In dense networks the number of shortest paths
+can grow very fast: ``max_paths`` stops the search after that many.
 
 .. code-block:: python
 
@@ -20,14 +22,15 @@ one or more targets. Nodes not in the graph, and pairs without a path, are skipp
    paths = get_paths(ckn, sources, targets, directed=False, shortest_overall=True)
 
    # the network made of the paths' edges
-   g_paths = path_subgraph(paths, pss)
+   g_paths = path_subgraph(pss, paths)
 
 Neighbourhoods
 ==============
 
 :func:`~skm_tools.neighbors.get_neighborhood` returns the subgraph around some nodes, to
-any depth, following edges in both directions (default), downstream (``"out"``) or
-upstream (``"in"``). Every node gets a ``distance`` attribute.
+any depth (``depth=None``: everything reachable), following edges in both directions
+(default), downstream (``"out"``) or upstream (``"in"``). Every node gets a ``distance``
+attribute (named by ``distance_attr``).
 
 .. code-block:: python
 
@@ -44,7 +47,11 @@ Experimental data
 
 :func:`~skm_tools.experimental_data.add_experimental_data` adds logFC and p-values as
 node attributes. It returns a copy, so several experiments can be added to separate
-copies of the same network.
+copies of the same network. If several rows match a node (several genes of a functional
+cluster, or an id that is in the table more than once), the most significant is used:
+lowest p-value, then largest absolute logFC. Ids are matched exactly; normalise the table's
+index first if needed (e.g. ``df.index.str.upper()``). A warning is logged if no node
+matches.
 
 .. code-block:: python
 
@@ -83,8 +90,8 @@ Minimum cuts
 :func:`~skm_tools.cuts.get_cutset` finds the smallest set of edges that disconnects a set
 of sources from a set of targets, e.g. the bottlenecks between a signal and a response. It
 needs a :class:`networkx.DiGraph` (for PSS, run :func:`~skm_tools.pss.simplify_pss` first)
-with a ``capacity`` on every edge; a capacity of 1 counts edges. It prints the maximum
-flow, and returns the cut edges:
+with a ``capacity`` on every edge; a capacity of 1 counts edges. It returns the cut edges,
+and logs the maximum flow (``return_flow=True`` returns it too):
 
 .. code-block:: python
 
@@ -95,9 +102,9 @@ flow, and returns the cut edges:
    simple = simplify_pss(pss)
    nx.set_edge_attributes(simple, 1, "capacity")
 
-   get_cutset(["flg22"], ["WRKY33[fc00166]"], simple)
-   # max_flow = 1
+   get_cutset(simple, ["flg22"], ["WRKY33[fc00166]"])
    # [('MPK3,6[fc00308]', 'WRKY33[fc00166]')]
+   cut, flow = get_cutset(simple, ["flg22"], ["WRKY33[fc00166]"], return_flow=True)
 
 Saving and serialising
 ======================
@@ -129,11 +136,23 @@ Saving and serialising
      - 6 s
      - 193 MB
      - Portable and safe; keeps lists
-   * - ``graphml``
-     - 43 s
-     - 84 s
-     - 262 MB
-     - For other network tools; lists are joined with ``;``, empty values left out
+
+For other network tools, load the network into Cytoscape (:doc:`cytoscape`) or use
+networkx's own writers.
 
 :mod:`skm_tools.serialize` converts graphs and paths to JSON-safe dicts and lists
-(:func:`~skm_tools.serialize.graph_to_dict`, :func:`~skm_tools.serialize.path_to_dict`).
+(:func:`~skm_tools.serialize.graph_to_dict`, :func:`~skm_tools.serialize.paths_to_dict`).
+Node ids must be strings or integers, and attributes can't be named like the format's
+fields (``id`` for nodes; ``source``, ``target``, ``key`` for edges): rename them first.
+With the graph, :func:`~skm_tools.serialize.paths_to_dict` also gives the nodes' labels and
+each step's interaction:
+
+.. code-block:: python
+
+   from skm_tools.serialize import paths_to_dict
+
+   paths_to_dict(paths, pss)
+   # {"paths": [["ABA", "PYL[fc00313]", ...]], "lengths": [5],
+   #  "nodes": {"ABA": {"display_label": "ABA"}, ...},
+   #  "steps": [[{"source": "ABA", "target": "PYL[fc00313]",
+   #              "interaction": ["positive-influence"]}, ...]]}

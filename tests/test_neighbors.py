@@ -15,7 +15,17 @@ def test_first_neighbours_both_directions():
 
 def test_depth():
     assert neighborhood_nodes(_chain(), "A", depth=2, direction="out") == {"A": 0, "B": 1, "X": 1, "C": 2}
-    assert neighborhood_nodes(_chain(), "A", depth=0) == {"A": 0}
+
+
+def test_unlimited_depth():
+    assert neighborhood_nodes(_chain(), "A", depth=None, direction="out") == \
+        {"A": 0, "B": 1, "X": 1, "C": 2, "D": 3}
+
+
+@pytest.mark.parametrize("depth", [0, -1, 1.5, True, "2"])
+def test_bad_depth(depth):
+    with pytest.raises(ValueError, match="positive integer or None"):
+        neighborhood_nodes(_chain(), "A", depth=depth)
 
 
 def test_direction_in():
@@ -27,8 +37,9 @@ def test_several_start_nodes_take_closest_distance():
     assert d["A"] == 0 and d["D"] == 0 and d["C"] == 2
 
 
-def test_unknown_nodes_ignored_and_bad_direction_raises():
+def test_unknown_nodes_ignored_and_bad_direction_raises(caplog):
     assert neighborhood_nodes(_chain(), ["nope"]) == {}
+    assert "nope" in caplog.text
     with pytest.raises(ValueError):
         neighborhood_nodes(_chain(), "A", direction="sideways")
 
@@ -66,3 +77,24 @@ def test_isolated_start_node_kept():
     g = _chain()
     g.add_node("lonely")
     assert set(get_neighborhood(g, "lonely", induced=False)) == {"lonely"}
+
+
+def test_neighbourhood_not_induced_in_direction_depth_2():
+    h = get_neighborhood(_chain(), "C", depth=2, direction="in", induced=False)
+    assert set(h.edges()) == {("B", "C"), ("A", "B"), ("X", "B")}
+    assert dict(h.nodes(data="distance")) == {"C": 0, "B": 1, "A": 2, "X": 2}
+
+
+def test_neighbourhood_not_induced_undirected():
+    g = nx.Graph([("A", "B"), ("B", "C"), ("A", "C"), ("C", "D")])
+    h = get_neighborhood(g, "A", depth=2, induced=False)
+    # B and C are both first neighbours: their edge isn't followed
+    assert {frozenset(e) for e in h.edges()} == {frozenset(e) for e in [("A", "B"), ("A", "C"), ("C", "D")]}
+
+
+def test_distance_attr():
+    g = _chain()
+    g.nodes["B"]["distance"] = 12.5  # e.g. a measured distance
+    h = get_neighborhood(g, "A", distance_attr="steps")
+    assert h.nodes["B"]["distance"] == 12.5 and h.nodes["B"]["steps"] == 1
+    assert "steps" not in get_neighborhood(g, "A", distance_attr=None).nodes["B"]
