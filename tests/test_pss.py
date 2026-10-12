@@ -503,6 +503,109 @@ def test_remove_and_rewire_nothing_to_rewire_and_missing_nodes(caplog):
     assert "nope" in caplog.text
 
 
+def _catalysis_edge(reaction_id, source_role, target_role):
+    edge = _base_edge(reaction_id, "activation")
+    edge["reaction_type"] = "catalysis"
+    edge["source_role"], edge["target_role"] = source_role, target_role
+    if (source_role, target_role) == ("catalyst", "substrate"):
+        edge["interaction"] = "negative-influence"
+    return edge
+
+
+def _pathway():
+    """E1 catalyses A -> B (R1), E2 catalyses B -> C (R2), with the catalysis rules of the
+    interaction network: substrate -> product, catalyst -> product, catalyst -| substrate"""
+    g = nx.DiGraph()
+    for n in ("E1", "E2"):
+        g.add_node(n, node_type="PlantCoding")
+    for n in "ABC":
+        g.add_node(n, node_type="Metabolite")
+    for rid, enzyme, substrate, product in (("R1", "E1", "A", "B"), ("R2", "E2", "B", "C")):
+        g.add_edge(substrate, product, **_catalysis_edge(rid, "substrate", "product"))
+        g.add_edge(enzyme, product, **_catalysis_edge(rid, "catalyst", "product"))
+        g.add_edge(enzyme, substrate, **_catalysis_edge(rid, "catalyst", "substrate"))
+    return g
+
+
+def test_remove_and_rewire_metabolites_connects_the_enzymes():
+    g = _pathway()
+
+    remove_and_rewire(g, ["A", "B", "C"])
+
+    assert set(g.edges()) == {("E1", "E2")}
+    data = g["E1"]["E2"]
+    assert data["interaction"] == "positive-influence"
+    assert data["reaction_id"] == ["R1", "R2"]
+    assert data["note"] == "rewired through B"
+    # from E1 -> B (E1 the catalyst), and B -> E2 (the consumption edge E2 -| B read the other way)
+    assert (data["source_role"], data["target_role"]) == ("catalyst", "catalyst")
+
+
+def test_remove_and_rewire_catalysis_substrate_kept():
+    g = _pathway()
+
+    remove_and_rewire(g, ["C"])
+
+    # nothing downstream of C: its edges go, the others are unchanged
+    assert set(g.edges()) == {("A", "B"), ("E1", "B"), ("E1", "A"), ("E2", "B")}
+    assert g["E2"]["B"]["interaction"] == "negative-influence"
+
+
+def test_remove_and_rewire_does_not_rewire_through_consumption():
+    g = _pathway()
+
+    remove_and_rewire(g, ["B"])
+
+    # E1 -> B -> E2 and A -> B -> E2; not E2 -| B -> C, and not B -> C (R2 is catalysed: B
+    # reaches C through E2)
+    assert g["E1"]["E2"]["interaction"] == "positive-influence"
+    assert g["A"]["E2"]["interaction"] == "positive-influence"
+    assert not g.has_edge("E1", "C") and not g.has_edge("A", "C")
+    assert g["E2"]["C"] == _catalysis_edge("R2", "catalyst", "product")   # unchanged, not merged
+    assert g["E1"]["A"]["interaction"] == "negative-influence"             # kept: A is kept
+
+
+def test_remove_and_rewire_metabolites_in_any_order():
+    for order in (["A", "B", "C"], ["C", "B", "A"], ["B", "C", "A"]):
+        g = _pathway()
+        remove_and_rewire(g, order)
+        assert set(g.edges()) == {("E1", "E2")}, order
+
+
+def test_remove_and_rewire_product_with_substrate_kept():
+    # removing only B: A (kept) still reaches E2 (through B), and E1 too
+    g = _pathway()
+    remove_and_rewire(g, ["B"])
+    assert g.has_edge("A", "E2") and g.has_edge("E1", "E2")
+
+
+def test_remove_and_rewire_uncatalysed_step_is_skipped():
+    # E1: A -> B, then B -> C without a catalyst (R2), then E3: C -> D
+    g = _pathway()
+    g.remove_edges_from([("E2", "C"), ("E2", "B")])
+    g.remove_node("E2")
+    g.add_node("E3", node_type="PlantCoding")
+    g.add_node("D", node_type="Metabolite")
+    g.add_edge("C", "D", **_catalysis_edge("R3", "substrate", "product"))
+    g.add_edge("E3", "D", **_catalysis_edge("R3", "catalyst", "product"))
+    g.add_edge("E3", "C", **_catalysis_edge("R3", "catalyst", "substrate"))
+
+    remove_and_rewire(g, ["A", "B", "C", "D"])
+
+    assert set(g.edges()) == {("E1", "E3")}
+    assert g["E1"]["E3"]["reaction_id"] == ["R1", "R2", "R3"]
+    assert g["E1"]["E3"]["interaction"] == "positive-influence"
+
+
+def test_remove_and_rewire_metabolites_dry_run():
+    g = _pathway()
+    planned = remove_and_rewire(g, ["A", "B", "C"], dry_run=True)
+    h = _pathway()
+    remove_and_rewire(h, ["A", "B", "C"])
+    assert [(u, v) for u, v, _ in planned] == sorted(h.edges())
+    assert g.number_of_nodes() == 5
+
+
 def test_filter_pss_nodes_removes_complexes_by_component():
     g = nx.MultiDiGraph()
     g.add_node("CTR[fc00049]", node_type="PlantCoding")

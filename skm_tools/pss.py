@@ -587,6 +587,44 @@ def _propagates(e):
                 and e.get("target_role") != "product")
 
 
+def _catalysis_edge(e, source_role, target_role):
+    '''Whether `e` is a catalysis edge of a reaction (not a rewired one: those take their roles from
+    the edges they replace) from `source_role` to `target_role`.'''
+    return (e.get("reaction_type") == "catalysis" and not str(e.get("note") or "").startswith("rewired")
+            and e.get("source_role") == source_role and e.get("target_role") == target_role)
+
+
+def _consumes(e):
+    '''Whether `e` is a catalysis consumption edge, catalyst -| substrate (the enzyme uses up its
+    substrate): not rewired through as it is; see :func:`_feeds`.'''
+    return _catalysis_edge(e, "catalyst", "substrate")
+
+
+def _catalysis(e):
+    '''Whether `e` is a catalysis edge catalyst -> product.'''
+    return _catalysis_edge(e, "catalyst", "product")
+
+
+def _conversion(e):
+    '''Whether `e` is a catalysis conversion edge, substrate -> product.'''
+    return _catalysis_edge(e, "substrate", "product")
+
+
+def _feeds(e):
+    '''A catalysis consumption edge (catalyst -| substrate) read the other way, for rewiring through
+    the substrate: substrate -> catalyst, positive (the substrate feeds the catalyst's reaction).'''
+    data = {}
+    for k, value in e.items():
+        if k.startswith("source_"):
+            data["target_" + k[len("source_"):]] = value
+        elif k.startswith("target_"):
+            data["source_" + k[len("target_"):]] = value
+        else:
+            data[k] = value
+    data["interaction"] = "positive-influence"
+    return data
+
+
 def _rewired_edge(up, down, node):
     '''The edge replacing up (A -> node) and down (node -> C).'''
     data = {}
@@ -608,14 +646,30 @@ def _rewired_edge(up, down, node):
 def remove_and_rewire(g, nodes, dry_run=False):
     '''Remove nodes, connecting each of their upstream nodes to each of their downstream nodes.
 
-    Changes `g` in place. The nodes are removed one at a time, in the given order, each
-    against the graph as rewired so far, so chains of removed nodes (A -> B -> C -> D,
-    removing B and C) are bridged (A -> D).
+    Changes `g` in place. The nodes are removed one at a time, each against the graph as
+    rewired so far, so chains of removed nodes (A -> B -> C -> D, removing B and C) are
+    bridged (A -> D). They are removed upstream first (in a topological order of the network,
+    nodes on a cycle by name), whatever the order they are given in, so the result doesn't
+    depend on it.
 
     Rewiring doesn't go through the mutual edges between binding partners
     (partner <-> partner), in either direction, only through the complex-forming ones
     (partner -> complex): A -> B and B <-> D (binding) give no A -> D, but A -> B and
     B -> B|D give A -> B|D.
+
+    Catalysis: the catalyst -| substrate edges (the enzyme uses up its substrate) are not
+    rewired through as they are. Removing a substrate connects the nodes upstream of it to its
+    catalysts instead, as substrate -> catalyst (positive); and not to the product of a
+    catalysed reaction, which it reaches through the catalyst (the substrate -> product edge of
+    a reaction with a catalyst is not rewired through, from the substrate's side; nor from the
+    product's, when the substrate is removed too, so the result doesn't depend on the order).
+    So removing the metabolites of a pathway connects its enzymes, in order: E1 catalysing
+    A -> B and E2 catalysing B -> C give E1 -> E2 (through B; positive), without shortcuts
+    past E2. A reaction without a catalyst
+    keeps its substrate -> product route (E1 -> B, B -> C uncatalysed, C -> D by E3: E1 -> E3).
+    The edges are recognised by their ``reaction_type``, roles and reaction ids; after
+    :func:`simplify_pss`, an edge merged with another reaction's edge between the same two
+    nodes keeps the first reaction's ``reaction_type`` and roles, and may not be.
 
     A new edge A -> C, replacing A -> B -> C:
 
@@ -656,16 +710,48 @@ def remove_and_rewire(g, nodes, dry_run=False):
         raise NotImplementedError("Currently only implemented for DiGraph, "
                                   "see simplify_pss.")
     nodes, _ = resolve_nodes(g, nodes)
+    to_remove = set(nodes)
+    # upstream first: the topological order of the condensation (a cycle's nodes by name)
+    c = nx.condensation(g)
+    rank = {n: (i, str(n)) for i, scc in enumerate(nx.topological_sort(c)) for n in c.nodes[scc]["members"]}
+    nodes = sorted(dict.fromkeys(nodes), key=rank.get)
 
     h = g.copy() if dry_run else g
     reasons = {}
     changed = set()  # (u, v) edges added or changed
 
     for node in dict.fromkeys(nodes):
-        upstream = [u for u in h.predecessors(node) if u != node and _propagates(h[u][node])]
-        downstream = [v for v in h.successors(node) if v != node and _propagates(h[node][v])]
-        new_edges = [(u, v, _rewired_edge(h[u][node], h[node][v], node))
-                     for u in upstream for v in downstream if u != v]
+        # (edge into the node, edge out of it) by upstream / downstream node; a catalyst using
+        # up the node (catalyst -| node) is downstream of it (node -> catalyst)
+        upstream, downstream = {}, {}
+        catalysed = set()       # reactions with a catalyst using up the node
+        made = {r for u in h.predecessors(node) if _catalysis(h[u][node])   # by a catalyst
+                for r in _reaction_ids(h[u][node])}
+        for u in h.predecessors(node):
+            e = h[u][node]
+            if u == node or not _propagates(e):
+                continue
+            if _consumes(e):
+                downstream[u] = _feeds(e)
+                catalysed.update(_reaction_ids(e))
+                continue
+            # from a substrate also removed, of a catalysed reaction: it reaches the node through
+            # the catalyst
+            ids = set(_reaction_ids(e))
+            if _conversion(e) and u in to_remove and ids and ids <= made:
+                continue
+            upstream[u] = e
+        for v in h.successors(node):
+            e = h[node][v]
+            if v == node or not _propagates(e):
+                continue
+            # the product of a catalysed reaction: reached through its catalyst
+            ids = set(_reaction_ids(e))
+            if _conversion(e) and ids and ids <= catalysed:
+                continue
+            downstream.setdefault(v, e)
+        new_edges = [(u, v, _rewired_edge(up, down, node))
+                     for u, up in upstream.items() for v, down in downstream.items() if u != v]
 
         h.remove_node(node)
         for u, v, data in new_edges:
