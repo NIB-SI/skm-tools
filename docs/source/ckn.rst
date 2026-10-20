@@ -10,11 +10,11 @@ sources and interaction types. Everything here is in :mod:`skm_tools.ckn`.
 Loading
 =======
 
-:func:`~skm_tools.ckn.ckn_to_networkx` loads CKN (v2.0.1) as a :class:`networkx.DiGraph`,
+:func:`~skm_tools.ckn.ckn_to_networkx` loads CKN (v2.1) as a :class:`networkx.DiGraph`,
 downloading the files from `skm.nib.si <https://skm.nib.si>`_ if they don't exist locally:
 to the given paths, or, without paths, into ``data_dir`` (default: the current folder) under
-the names the browser gives them (``AtCKN-v2.0.1-2026.10.tsv.gz`` and
-``AtCKN-v2.0.1-2026.10_node-annot.tsv.gz``). A file name ending in ``.gz`` is saved gzipped,
+the names the browser gives them (``AtCKN-v2.1-2026.10.tsv.gz`` and
+``AtCKN-v2.1-2026.10_node-annot.tsv.gz``). A file name ending in ``.gz`` is saved gzipped,
 any other name uncompressed.
 
 .. code-block:: python
@@ -26,7 +26,7 @@ any other name uncompressed.
 By default, undirected edges (e.g. binding) are added in both directions, so directed path
 searches can use them either way (``as_directed=True``); with ``as_directed=False``, every
 edge is added once, as listed in the file. Nodes of the node file without edges are left
-out. Older CKN versions (before v2.0.1) are not supported.
+out. Older CKN versions (before v2.1) are not supported.
 
 Node attributes include ``node_type``, ``locus_type``, ``species``, ``TAIR``,
 ``display_label``, ``short_name``, ``synonyms``, ``description``, ``mapman`` (see
@@ -66,7 +66,7 @@ returns the removed edges and the removed nodes (``{node: "isolate"}``).
 :func:`~skm_tools.ckn.filter_ckn_nodes` keeps only nodes of some types, species or tissues,
 and returns the reasons nodes were removed (``{node: reason}``). Complexes that lose a
 component are removed too: a complex can't exist without its components. So complexes of a
-plant protein and a pathogen protein (species ``ath/foreign``, e.g. ``RISC|virus_vsiRNA``)
+plant protein and a pathogen protein (species ``ath/foreign``, e.g. ``RISC - vsiRNA``)
 are removed by ``species=["ath"]``. Nodes without a species (metabolites) are kept by the
 species filter.
 

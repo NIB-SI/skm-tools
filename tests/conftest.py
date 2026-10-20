@@ -5,11 +5,11 @@ FIXTURES = Path(__file__).parent / "fixtures"
 
 @pytest.fixture
 def ckn_edge_path():
-    return FIXTURES / "ckn_v2.0.1_edges.tsv"
+    return FIXTURES / "ckn_v2.1_edges.tsv"
 
 @pytest.fixture
 def ckn_node_path():
-    return FIXTURES / "ckn_v2.0.1_nodes.tsv.gz"
+    return FIXTURES / "ckn_v2.1_nodes.tsv.gz"
 
 @pytest.fixture
 def pss_reaction_graph_edge_path():

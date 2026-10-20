@@ -12,8 +12,8 @@ from skm_tools.skm_download_urls import CKN_EDGE_FILE, CKN_EDGE_URL, CKN_NODE_FI
 
 from .conftest import FIXTURES
 
-EDGES = FIXTURES / "ckn_v2.0.1_edges.tsv"
-NODES = FIXTURES / "ckn_v2.0.1_nodes.tsv.gz"
+EDGES = FIXTURES / "ckn_v2.1_edges.tsv"
+NODES = FIXTURES / "ckn_v2.1_nodes.tsv.gz"
 
 
 @pytest.fixture
@@ -22,7 +22,7 @@ def ckn():
 
 
 def _write_ckn(tmp_path, edge_rows, node_rows):
-    '''Small CKN files: rows as lists of values, in the v2.0.1 columns.'''
+    '''Small CKN files: rows as lists of values, in the v2.1 columns.'''
     edge_header = ["source", "interaction", "target", "directed", "rank", "effect", "type", "species",
                    "isTFregulation", "interactionSources"]
     node_header = ["id", "node_type", "locus_type", "species", "TAIR", "display_label", "short_name",
@@ -121,9 +121,9 @@ class TestCKNToNetworkx:
         nodes = tmp_path / "nodes.tsv"
         with gzip.open(NODES, "rt") as handle:
             lines = handle.read().splitlines()
-        # drop the locus_type column (the format before CKN v2.0.1)
+        # drop the locus_type column (the format before CKN v2.1)
         nodes.write_text("\n".join("\t".join(l.split("\t")[:2] + l.split("\t")[3:]) for l in lines))
-        with pytest.raises(ValueError, match="not a CKN v2.0.1 node file"):
+        with pytest.raises(ValueError, match="not a CKN v2.1 node file"):
             ckn_to_networkx(EDGES, nodes)
 
 
@@ -144,7 +144,7 @@ def test_gene_symbols_with_semicolon_stay_whole(ckn):
 
 
 def test_quotes_are_part_of_values(tmp_path):
-    # CKN v2.0.1 is written without quoting: a value can start with '"'
+    # CKN v2.1 is written without quoting: a value can start with '"'
     edges, nodes = _write_ckn(tmp_path, [_edge("A", "B")],
                               [_gene("A", synonyms='"sunken"|low'), _gene("B", description='"x" and y')])
     g = ckn_to_networkx(edges, nodes)
@@ -163,8 +163,9 @@ def test_missing_directed_is_none(tmp_path):
 # node_type: PSS classes, with the TAIR locus type of genes and RNAs in locus_type
 # ---------------------------------------------------------------------------
 
-PSS_CLASSES = {"PlantCoding", "PlantNonCoding", "PlantPseudogene", "Metabolite", "Complex", "Process",
-               "ForeignCoding", "ForeignNonCoding", "ForeignEntity", "ForeignAbiotic"}
+PSS_CLASSES = {"PlantCoding", "PlantNonCoding", "PlantPseudogene", "PlantAbstract", "Metabolite",
+               "MetaboliteFamily", "Complex", "Process", "ForeignCoding", "ForeignNonCoding", "ForeignEntity",
+               "ForeignAbiotic"}
 
 
 def test_node_types_are_pss_classes(ckn):
@@ -241,9 +242,9 @@ def test_filter_ckn_nodes_string_arguments(ckn):
 
 
 def test_filter_ckn_nodes_mixed_complex_removed_with_its_foreign_component(ckn):
-    assert ckn.nodes["RISC|virus_vsiRNA"]["species"] == "ath/foreign"
+    assert ckn.nodes["RISC - vsiRNA"]["species"] == "ath/foreign"
     reasons = filter_ckn_nodes(ckn, species="ath")
-    assert "RISC|virus_vsiRNA" in reasons
+    assert "RISC - vsiRNA" in reasons
 
 
 def test_filter_ckn_nodes_complex_component_removed():

@@ -11,7 +11,7 @@ from .utils import as_list, download_if_missing, read_skm_table, remove_isolate_
 
 logger = logging.getLogger(__name__)
 
-# CKN files (v2.0.1): the format of the PSS exports (see skm_tools.utils.read_skm_table)
+# CKN files (v2.1): the format of the PSS exports (see skm_tools.utils.read_skm_table)
 _CKN_LIST_COLUMNS = {"synonyms", "mapman", "tissue", "interactionSources"}
 _CKN_BOOL_COLUMNS = {"directed"}
 _CKN_INT_COLUMNS = {"rank", "isTFregulation"}
@@ -31,18 +31,18 @@ def ckn_to_networkx(
         create_using=nx.DiGraph,
         data_dir=".",
     ):
-    ''' Load CKN (v2.0.1) to a networkx directed graph, including node attributes.
+    ''' Load CKN (v2.1) to a networkx directed graph, including node attributes.
 
     Downloads the CKN files from skm.nib.si if they don't exist yet.
 
     Parameters
     ----------
     edge_path : str or pathlib.Path, optional
-        Path to the edge file (default ``<data_dir>/AtCKN-v2.0.1-2026.10.tsv.gz``); if the
+        Path to the edge file (default ``<data_dir>/AtCKN-v2.1-2026.10.tsv.gz``); if the
         file does not exist, it is downloaded from skm.nib.si, gzipped if the name ends in
         ``.gz``.
     node_path : str or pathlib.Path, optional
-        Path to the node file (default ``<data_dir>/AtCKN-v2.0.1-2026.10_node-annot.tsv.gz``);
+        Path to the node file (default ``<data_dir>/AtCKN-v2.1-2026.10_node-annot.tsv.gz``);
         downloaded as for `edge_path`.
     as_directed : bool
         Add undirected edges (``directed`` False, e.g. binding) in both directions, so
@@ -77,7 +77,7 @@ def ckn_to_networkx(
                              _CKN_LIST_COLUMNS, _CKN_BOOL_COLUMNS, _CKN_INT_COLUMNS)
     node_df = read_skm_table(download_if_missing(node_path, CKN_NODE_URL), _CKN_LIST_COLUMNS)
     if "locus_type" not in node_df.columns:
-        raise ValueError(f"{node_path} is not a CKN v2.0.1 node file (no locus_type column); "
+        raise ValueError(f"{node_path} is not a CKN v2.1 node file (no locus_type column); "
                          "older CKN versions are not supported.")
 
     g = create_using()
@@ -191,7 +191,7 @@ def filter_ckn_nodes(g,
     species : str or iterable of str, optional
         Keep only nodes of these species (e.g. ``"ath"``); nodes without a species
         (e.g. metabolites) are kept. Complexes of an Arabidopsis protein and a pathogen
-        (species ``"ath/foreign"``, e.g. ``RISC|virus_vsiRNA``) are removed with
+        (species ``"ath/foreign"``, e.g. ``RISC - vsiRNA``) are removed with
         ``species="ath"``, as their foreign component is.
     tissues : str or iterable of str, optional
         Keep only nodes annotated with at least one of these tissues.

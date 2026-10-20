@@ -4,8 +4,8 @@ The default file names are the names the browser gives the downloads, without th
 that change between exports (the export date of PSS, the version of the translations).
 '''
 
-# CKN v2.0.1 (on the dev server; not yet on production as of 2026-10-07)
-CKN_VERSION = 'v2.0.1-2026.10'
+# CKN v2.1 (on the dev server; not yet on production as of 2026-10-20)
+CKN_VERSION = 'v2.1-2026.10'
 CKN_EDGE_URL = f'https://skm.nib.si/downloads/ckn/{CKN_VERSION}/edges'
 CKN_NODE_URL = f'https://skm.nib.si/downloads/ckn/{CKN_VERSION}/nodes'
 CKN_EDGE_FILE = f'AtCKN-{CKN_VERSION}.tsv.gz'
