@@ -48,10 +48,12 @@ def integrate_translation_ckn(g,
                               keep_unmapped=True):
     """Translate the Arabidopsis genes of CKN to another species' gene identifiers.
 
-    Each ``ath`` node (other than complexes) is replaced by one node per translation of
-    its gene; translations can be many-to-many, and all are kept. Translated node ids are
-    ``{original}_{translation}``, so one original can have several translations. Edges of
-    the original node are copied to every new node. Nodes of other species are copied as is.
+    Each node with an Arabidopsis gene identifier (`g_source_attribute`, e.g. ``TAIR``) is
+    replaced by one node per translation of its gene; translations can be many-to-many, and
+    all are kept. Translated node ids are ``{original}_{translation}``, so one original can
+    have several translations. Edges of the original node are copied to every new node.
+    Nodes without an identifier (complexes, metabolites, processes, nodes of other species)
+    are copied as they are.
 
     Translation edges (see `edges_within_translation`, `edges_across_translation`) have
     ``type`` and ``interaction`` ``"homology"`` and ``directed`` False; in a directed graph,
@@ -81,8 +83,8 @@ def integrate_translation_ckn(g,
         Link the nodes of different originals that translate to the same gene
         (``translation_relation`` == ``"same_translation_target"``).
     keep_unmapped : bool
-        Keep ``ath`` nodes without a translation (with ``translated`` False), or drop them
-        and their edges.
+        Keep the nodes with an identifier but without a translation (with ``translated``
+        False), or drop them and their edges.
 
     Returns
     -------
@@ -105,11 +107,9 @@ def integrate_translation_ckn(g,
     mapping = translation_df.groupby(t_source_col)[t_target_col].apply(list).to_dict()
 
 
-    # only want to map nodes from "ath": "species" attribute is "ath"
-    # if species is "ath" but there is no mapping, we can choose to either keep the original node or drop it (keep_unmapped)
-    # if keep, add an annotation that is is unmapped
-
-    # non "ath" nodes, are copied over as is
+    # only nodes with a source identifier (Arabidopsis genes) are translated; if there is no
+    # mapping, the node is kept (with translated False) or dropped (keep_unmapped).
+    # Nodes without an identifier are copied as they are.
 
     # first add all the nodes (and track ids), then add all the edges
 
@@ -129,10 +129,8 @@ def integrate_translation_ckn(g,
 
     for node, data in g.nodes(data=True):
         source_id = data.get(g_source_attribute)
-        species = data.get('species')
-        node_type = data.get('node_type')
 
-        if (species == 'ath') and (node_type != 'Complex'):
+        if source_id:
             if source_id in mapping:
                 target_ids = mapping[source_id]
                 new_node_ids = []

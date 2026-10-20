@@ -11,7 +11,8 @@ py4cytoscape's console output (e.g. the text of errors that are handled, such as
 retries in :func:`clone_network`) is silenced when this module is imported, see
 :func:`silence_py4cytoscape`.
 
-The helpers that don't need Cytoscape (matching image files to nodes, chart definitions)
+The helpers that don't need Cytoscape (matching image files to nodes, number badges, chart
+definitions)
 are in :mod:`skm_tools.node_images`, and also available here.
 
 Nodes and edges are matched to Cytoscape by name: a node's ``name`` is its networkx node
@@ -22,6 +23,7 @@ between the same two nodes are matched together.
 '''
 
 import logging
+import numbers
 import re
 import sys
 import time
@@ -29,6 +31,7 @@ import uuid
 from collections import defaultdict
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 import py4cytoscape as p4c
 
@@ -38,6 +41,7 @@ from .node_images import (  # noqa: F401 (also here, for convenience)
     chart_column,
     match_files_to_nodes,
     node_file_key,
+    number_badges,
     unique_image_copies,
 )
 from .paths import path_edges
@@ -191,7 +195,7 @@ def set_style(style, network=None):
     p4c.set_visual_style(style, network=network)
 
 
-def load_network(g, title, collection=None, style=None):
+def load_network(g, title, collection=None, style=None, namespaces=None):
     '''Load a networkx graph into Cytoscape.
 
     Parameters
@@ -206,16 +210,181 @@ def load_network(g, title, collection=None, style=None):
     style : {"skm", "skm-reactions"}, optional
         Built-in SKM style to apply (see :func:`apply_builtin_style`); without it,
         Cytoscape's default style.
+    namespaces : dict, optional
+        Attribute-name prefix -> Cytoscape column namespace, for node and edge attributes.
+        Cytoscape groups columns named ``namespace::name`` under their namespace in the table
+        browser. E.g. ``{"gwas ": "gwas"}`` loads the attributes ``gwas maxLog10P`` and
+        ``gwas Rust maxLog10P`` as the columns ``gwas::maxLog10P`` and ``gwas::Rust maxLog10P``.
+        The longest matching prefix is used; an attribute that equals a prefix keeps its name
+        (``{"translation": "translation"}``: ``translation::translation``). Other attributes,
+        and the networkx graph itself, are unchanged. Style mappings and other functions then
+        use the Cytoscape column names.
 
     Returns
     -------
     int
         SUID of the new Cytoscape network.
+
+    Notes
+    -----
+    Table columns are created with the type of the attribute's values before the values are
+    loaded: Cytoscape guesses a new column's type from the data, and can make a numeric column
+    with missing values (e.g. data on only some nodes) a String column, which a continuous
+    style mapping can't use. The type comes from the networkx values, so the same attribute
+    gets the same type in every network: integers become Integer columns (Long beyond 32
+    bits), other numbers Double, booleans Boolean, anything else String; lists (and tuples,
+    sets) become List columns of the type of their elements. Attributes that are missing on
+    every node (edge) are left out. Networks in one collection share their columns: a column
+    that exists already keeps its type, with a warning if it differs.
+
+    Cytoscape namespaces have one level (a column name is split at the first ``::``) and
+    ignore case, so a namespace can't contain ``::``, and two attributes whose column names
+    differ only in case raise a ValueError.
     '''
-    suid = p4c.networks.create_network_from_networkx(g, title=title, collection=collection)
+    # column types from the networkx values (pandas would make integers with gaps floats)
+    node_types = _column_types(attrs for _, attrs in g.nodes(data=True))
+    edge_types = _column_types(attrs for *_, attrs in g.edges(data=True))
+    node_types.pop("name", None)            # the node id
+    for k in ("source", "target", "interaction", "SUID"):   # the network structure
+        edge_types.pop(k, None)
+    node_columns = _cytoscape_names(node_types, namespaces)
+    edge_columns = _cytoscape_names(edge_types, namespaces)
+
+    nodes = pd.DataFrame.from_records([{**attrs, "name": str(n)} for n, attrs in g.nodes(data=True)])
+    edges = pd.DataFrame.from_records([{**attrs, "source": str(u), "target": str(v)}
+                                       for u, v, attrs in g.edges(data=True)])
+    if not edges.empty:
+        interaction = edges["interaction"] if "interaction" in edges else pd.Series(None, index=edges.index)
+        edges["interaction"] = interaction.fillna("interacts with").astype(str)
+
+    # structure only, then typed columns, then the values
+    suid = p4c.networks.create_network_from_data_frames(
+        nodes=nodes[["name"]], edges=edges[["source", "target", "interaction"]] if not edges.empty else None,
+        title=title, collection=collection, node_id_list="name")
+
+    if node_types:
+        _create_columns(node_types, node_columns, "node", suid)
+        _put_table(nodes, node_types, node_columns, "name", "name", "node", suid)
+    if edge_types:
+        _create_columns(edge_types, edge_columns, "edge", suid)
+        names = [f"{u} ({i}) {v}" for u, i, v in zip(edges["source"], edges["interaction"], edges["target"])]
+        edges["SUID"] = p4c.edge_name_to_edge_suid(names, network=suid, unique_list=True)
+        _put_table(edges, edge_types, edge_columns, "SUID", "SUID", "edge", suid)
+
     if style:
         apply_builtin_style(style, network=suid)
     return suid
+
+
+def _cytoscape_names(attributes, namespaces):
+    '''Attribute -> Cytoscape column name, with the namespace of its longest matching prefix'''
+    namespaces = namespaces or {}
+    bad = [ns for ns in namespaces.values() if "::" in ns or not ns]
+    if bad:
+        raise ValueError(f"Cytoscape namespaces have one level and can't be empty or contain '::': {bad}")
+    names = {}
+    for a in attributes:
+        prefix = max((p for p in namespaces if a.startswith(p)), key=len, default=None)
+        if prefix is None:
+            names[a] = a
+        else:
+            names[a] = f"{namespaces[prefix]}::{a[len(prefix):] or a}"
+    # Cytoscape ignores case in column names
+    seen = {}
+    for a, column in names.items():
+        other = seen.setdefault(column.lower(), a)
+        if other != a:
+            raise ValueError(f"Attributes {other!r} and {a!r} would both be the Cytoscape column "
+                             f"{column!r} (Cytoscape ignores case).")
+    return names
+
+
+def _column_types(attr_dicts):
+    '''Attribute -> (Cytoscape type, is list) for the attributes with any non-missing value'''
+    values = defaultdict(list)
+    for attrs in attr_dicts:
+        for k, v in attrs.items():
+            if not _is_missing(v):
+                values[k].append(v)
+    types = {}
+    for k, present in values.items():
+        if any(isinstance(v, (list, tuple, set)) for v in present):
+            elements = [e for v in present for e in (v if isinstance(v, (list, tuple, set)) else [v])
+                        if not _is_missing(e)]
+            types[k] = (_scalar_type(elements) if elements else "String", True)
+        else:
+            types[k] = (_scalar_type(present), False)
+    return types
+
+
+def _scalar_type(values):
+    '''Cytoscape type of (non-missing) values'''
+    if all(isinstance(v, (bool, np.bool_)) for v in values):
+        return "Boolean"
+    if all(isinstance(v, numbers.Integral) and not isinstance(v, (bool, np.bool_)) for v in values):
+        return "Integer" if all(-2**31 <= v < 2**31 for v in values) else "Long"
+    if all(isinstance(v, numbers.Real) and not isinstance(v, (bool, np.bool_)) for v in values):
+        return "Double"
+    return "String"
+
+
+def _is_missing(v):
+    if isinstance(v, (list, tuple, set, dict)):
+        return False
+    return v is None or bool(pd.isna(v))
+
+
+def _create_columns(types, columns, table, network):
+    '''Create the columns for `types` (attribute -> (type, is list)) that aren't in the table yet;
+    `columns` has their Cytoscape names.'''
+    # Cytoscape ignores case in column names
+    existing = {c.lower(): (c, t) for c, t in p4c.tables.get_table_column_types(table=table, network=network).items()}
+    for attribute, (cy_type, is_list) in types.items():
+        name = columns[attribute]
+        if name.lower() in existing:
+            found, found_type = existing[name.lower()]
+            wanted = "List" if is_list else cy_type
+            if found_type != wanted:
+                logger.warning("Column %r of the %s table is %s, not %s (it exists already, e.g. from "
+                               "another network in the collection).", found, table, found_type, wanted)
+            continue
+        p4c.commands.cyrest_post(f"networks/{network}/tables/default{table}/columns",
+                                 body={"name": name, "type": cy_type, "list": is_list}, require_json=False)
+
+
+def _put_table(df, types, columns, key_column, table_key, table, network):
+    '''Load the `types` columns of `df` into a Cytoscape table (as `columns`), matching `key_column`
+    to `table_key`.
+
+    Sent as JSON directly: py4cytoscape's ``load_table_data`` turns lists into strings.
+    '''
+    def convert(v, cy_type):
+        if isinstance(v, (list, tuple, set)):
+            return [convert(e, cy_type) for e in (sorted(v, key=str) if isinstance(v, set) else v)
+                    if not _is_missing(e)]
+        v = v.item() if isinstance(v, np.generic) else v
+        if cy_type == "Double":
+            return float(v)
+        if cy_type in ("Integer", "Long"):
+            return int(v)
+        if cy_type == "String":
+            return str(v)
+        return v
+
+    records = []
+    for row in df.to_dict(orient="records"):
+        key = row[key_column]
+        record = {table_key: key.item() if isinstance(key, np.generic) else key}
+        for column, (cy_type, is_list) in types.items():
+            v = row.get(column)
+            if _is_missing(v):
+                continue
+            if is_list and not isinstance(v, (list, tuple, set)):
+                v = [v]
+            record[columns[column]] = convert(v, cy_type)
+        records.append(record)
+    p4c.commands.cyrest_put(f"networks/{network}/tables/default{table}",
+                            body={"key": table_key, "dataKey": table_key, "data": records}, require_json=False)
 
 
 def apply_builtin_style(style="skm", network=None):
@@ -846,6 +1015,11 @@ IMAGE_POSITIONS = {
     "right": "E,W,c,0.00,0.00",
     "left": "W,E,c,0.00,0.00",
     "center": "C,C,c,0.00,0.00",
+    # centred on a corner, half outside the node (e.g. for badges)
+    "top-right": "NE,C,c,0.00,0.00",
+    "top-left": "NW,C,c,0.00,0.00",
+    "bottom-right": "SE,C,c,0.00,0.00",
+    "bottom-left": "SW,C,c,0.00,0.00",
 }
 
 
@@ -899,7 +1073,9 @@ def show_node_images(style, column, slot=1, position="below", size=110):
     slot : int
         Custom graphics slot, 1 to 9 (default 1).
     position : str
-        ``"below"`` (default), ``"above"``, ``"left"``, ``"right"``, ``"center"``, or a
+        ``"below"`` (default), ``"above"``, ``"left"``, ``"right"``, ``"center"``, a corner
+        (``"top-right"``, ``"top-left"``, ``"bottom-right"``, ``"bottom-left"``: centred on it,
+        e.g. for :func:`~skm_tools.node_images.number_badges`), or a
         Cytoscape custom graphics position (``"S,N,c,0.00,0.00"``: the image's north side
         on the node's south side, centred, no offset).
     size : float

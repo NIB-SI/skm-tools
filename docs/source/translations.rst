@@ -77,8 +77,9 @@ the species (e.g. ``apricot``), and is given as ``t_target_col``:
    ckn_apricot = integrate_translation_ckn(ckn, translations, t_target_col="apricot")
 
 Translated nodes have ``translated_from`` (the Arabidopsis node) and ``translation`` (the
-gene); Arabidopsis genes without a translation are kept with ``translated`` False
-(``keep_unmapped=False`` drops them, with their edges). Complexes and nodes of other species
-are copied as they are. The translations of one Arabidopsis gene, and the genes of different
+gene). Only nodes with an Arabidopsis gene id (``TAIR``) are translated; those without a
+translation are kept with ``translated`` False (``keep_unmapped=False`` drops them, with
+their edges). Nodes without a gene id (complexes, metabolites, processes, nodes of other
+species) are copied as they are. The translations of one Arabidopsis gene, and the genes of different
 Arabidopsis genes with the same translation, are linked by homology edges (``type`` and
 ``interaction`` ``homology``, ``directed`` False).

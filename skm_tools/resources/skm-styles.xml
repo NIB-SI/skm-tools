@@ -172,11 +172,19 @@
         </node>
         <edge>
             <dependency value="true" name="arrowColorMatchesEdge"/>
-            <visualProperty default="6.0" name="EDGE_SOURCE_ARROW_SIZE"/>
+            <visualProperty default="6.0" name="EDGE_SOURCE_ARROW_SIZE">
+                <discreteMapping attributeName="interaction" attributeType="string">
+                    <discreteMappingEntry attributeValue="homology" value="0.0"/>
+                </discreteMapping>
+            </visualProperty>
             <visualProperty default="#FFFF00" name="EDGE_SOURCE_ARROW_SELECTED_PAINT"/>
             <visualProperty default="#000000" name="EDGE_TARGET_ARROW_UNSELECTED_PAINT"/>
             <visualProperty default="8" name="EDGE_LABEL_FONT_SIZE"/>
-            <visualProperty default="255" name="EDGE_TRANSPARENCY"/>
+            <visualProperty default="255" name="EDGE_TRANSPARENCY">
+                <discreteMapping attributeName="interaction" attributeType="string">
+                    <discreteMappingEntry attributeValue="homology" value="180"/>
+                </discreteMapping>
+            </visualProperty>
             <visualProperty name="EDGE_BEND"/>
             <visualProperty default="#FFFF00" name="EDGE_TARGET_ARROW_SELECTED_PAINT"/>
             <visualProperty default="SOLID" name="EDGE_LINE_TYPE">
@@ -184,7 +192,7 @@
                     <discreteMappingEntry attributeValue="false" value="LONG_DASH"/>
                 </discreteMapping>
             </visualProperty>
-            <visualProperty default="2.0" name="EDGE_WIDTH">
+            <visualProperty default="1.0" name="EDGE_WIDTH">
                 <discreteMapping attributeName="rank" attributeType="integer">
                     <discreteMappingEntry attributeValue="0" value="4.0"/>
                     <discreteMappingEntry attributeValue="1" value="3.0"/>
@@ -200,6 +208,7 @@
             <visualProperty default="#5D5D5D" name="EDGE_UNSELECTED_PAINT">
                 <discreteMapping attributeName="interaction" attributeType="string">
                     <discreteMappingEntry attributeValue="negative-influence" value="#CD0000"/>
+                    <discreteMappingEntry attributeValue="homology" value="#67A9CF"/>
                     <discreteMappingEntry attributeValue="positive-influence" value="#008040"/>
                     <discreteMappingEntry attributeValue="unknown-influence" value="#5D5D5D"/>
                 </discreteMapping>
@@ -209,6 +218,7 @@
             <visualProperty default="#5D5D5D" name="EDGE_STROKE_UNSELECTED_PAINT">
                 <discreteMapping attributeName="interaction" attributeType="string">
                     <discreteMappingEntry attributeValue="negative-influence" value="#CD0000"/>
+                    <discreteMappingEntry attributeValue="homology" value="#67A9CF"/>
                     <discreteMappingEntry attributeValue="positive-influence" value="#008040"/>
                     <discreteMappingEntry attributeValue="unknown-influence" value="#5D5D5D"/>
                 </discreteMapping>
@@ -228,6 +238,7 @@
             <visualProperty default="ARROW" name="EDGE_TARGET_ARROW_SHAPE">
                 <discreteMapping attributeName="interaction" attributeType="string">
                     <discreteMappingEntry attributeValue="negative-influence" value="T"/>
+                    <discreteMappingEntry attributeValue="homology" value="NONE"/>
                     <discreteMappingEntry attributeValue="positive-influence" value="DELTA"/>
                     <discreteMappingEntry attributeValue="unknown-influence" value="DIAMOND"/>
                 </discreteMapping>

@@ -46,12 +46,13 @@ def test_load_translation_file_default_name(tmp_path):
 # ---------------------------------------------------------------------------
 
 def _ckn():
-    """A -> B -> C (Arabidopsis genes), C -> A|B (complex), M (metabolite) -> A"""
-    g = nx.DiGraph([("A", "B"), ("B", "C"), ("C", "A|B"), ("M", "A")], interaction="positive-influence")
+    """A -> B -> C (Arabidopsis genes), C -> A|B (complex), M (metabolite) -> A, P (process, no gene) -> B"""
+    g = nx.DiGraph([("A", "B"), ("B", "C"), ("C", "A|B"), ("M", "A"), ("P", "B")], interaction="positive-influence")
     for n in "ABC":
         g.add_node(n, species="ath", node_type="PlantCoding", TAIR=f"AT{n}")
     g.add_node("A|B", species="ath", node_type="Complex", TAIR=None)
     g.add_node("M", species=None, node_type="Metabolite", TAIR=None)
+    g.add_node("P", species="ath", node_type="Process", TAIR=None)
     return g
 
 
@@ -62,10 +63,10 @@ TRANSLATIONS = pd.DataFrame({"ath_source": ["ATA", "ATA", "ATB", "ATB"],
 def test_integrate_translation_many_to_many():
     h = integrate_translation_ckn(_ckn(), TRANSLATIONS, "potato",
                                   edges_within_translation=False, edges_across_translation=False)
-    assert set(h) == {"A_St1", "A_St2", "B_St2", "B_St3", "C", "A|B", "M"}
+    assert set(h) == {"A_St1", "A_St2", "B_St2", "B_St3", "C", "A|B", "M", "P"}
     # edges copied to every translation
     assert set(h.edges()) == {(a, b) for a in ("A_St1", "A_St2") for b in ("B_St2", "B_St3")} | \
-        {("B_St2", "C"), ("B_St3", "C"), ("C", "A|B"), ("M", "A_St1"), ("M", "A_St2")}
+        {("B_St2", "C"), ("B_St3", "C"), ("C", "A|B"), ("M", "A_St1"), ("M", "A_St2"), ("P", "B_St2"), ("P", "B_St3")}
     assert h.nodes["A_St1"]["translation"] == "St1" and h.nodes["A_St1"]["translated_from"] == "A"
     assert h.nodes["C"]["translated"] is False
 
@@ -78,6 +79,8 @@ def test_integrate_translation_keeps_complexes():
 def test_integrate_translation_drop_unmapped_with_edges():
     h = integrate_translation_ckn(_ckn(), TRANSLATIONS, "potato", keep_unmapped=False)
     assert "C" not in h
+    # not a gene (no TAIR): not translated, so kept
+    assert "P" in h and "translated" not in h.nodes["P"]
     assert all("node_type" in d for _, d in h.nodes(data=True))
 
 

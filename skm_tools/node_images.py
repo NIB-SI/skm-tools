@@ -1,5 +1,5 @@
-'''Images and charts for network nodes: match image files to nodes, make unique copies, and
-build chart definitions.
+'''Images and charts for network nodes: match image files to nodes, make unique copies, make
+number badges, and build chart definitions.
 
 These helpers don't need Cytoscape; :mod:`skm_tools.cytoscape_utils` shows the results on the
 nodes (:func:`skm_tools.cytoscape_utils.load_node_images`,
@@ -119,6 +119,58 @@ def unique_image_copies(images, folder, to_png=False):
             shutil.copyfile(path, copy)
         copy_of[path] = copy
     return {node: copy_of[Path(p)] for node, p in images.items()}
+
+
+def number_badges(values, folder, size=40, color="#333333", text_color="white"):
+    '''Write a small round badge with a number for each of `values`, e.g. to show a count
+    (such as the number of SNPs of a gene) in a node's corner.
+
+    Each badge is an SVG file ``badge_<value>.svg`` in `folder`: a filled circle with a white
+    outline and the value in its centre. Show them per node with
+    :func:`skm_tools.cytoscape_utils.load_node_images` (node -> ``badges[count]``) and
+    :func:`skm_tools.cytoscape_utils.show_node_images`, e.g. with ``position="top-right"``.
+
+    Parameters
+    ----------
+    values : iterable
+        Values to make badges for (numbers, or short strings).
+    folder : str or pathlib.Path
+        Folder for the badges (created if needed). Existing badges are overwritten; as
+        Cytoscape caches images, use a new folder (or ``unique_dir`` of
+        :func:`~skm_tools.cytoscape_utils.load_node_images`) when changing their look.
+    size : int
+        Width and height in pixels (default 40); the size shown in Cytoscape is set by
+        :func:`~skm_tools.cytoscape_utils.show_node_images`.
+    color, text_color : str
+        Badge and number colours (default dark grey and white).
+
+    Returns
+    -------
+    dict
+        Value -> path of its badge.
+    '''
+    folder = Path(folder)
+    folder.mkdir(parents=True, exist_ok=True)
+    r = size / 2
+    badges = {}
+    for value in values:
+        text = str(value)
+        # smaller font for longer numbers; y: the baseline, so the digits are centred
+        font_size = size * (0.55 if len(text) < 2 else 0.45 if len(text) < 3 else 0.35)
+        svg = (f'<svg xmlns="http://www.w3.org/2000/svg" width="{size}" height="{size}" '
+               f'viewBox="0 0 {size} {size}">'
+               f'<circle cx="{r}" cy="{r}" r="{r - 1}" fill="{color}" stroke="white" stroke-width="2"/>'
+               f'<text x="{r}" y="{r + 0.36 * font_size:.1f}" text-anchor="middle" '
+               f'font-family="sans-serif" font-size="{font_size:.1f}" font-weight="bold" '
+               f'fill="{text_color}">{_xml_escape(text)}</text></svg>')
+        path = folder / f"badge_{text}.svg"
+        path.write_text(svg)
+        badges[value] = path
+    return badges
+
+
+def _xml_escape(text):
+    return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
 def chart_column(df, columns, colors, chart="barchart", value_range=None, labels=None,

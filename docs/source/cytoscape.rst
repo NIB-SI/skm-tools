@@ -45,12 +45,27 @@ Loading a network
 =================
 
 :func:`~skm_tools.cytoscape_utils.load_network` sends a networkx graph to Cytoscape. The
-node and edge attributes become table columns. ``style`` is optional: it applies one of
-the SKM styles; without it, Cytoscape uses its default style.
+node and edge attributes become table columns, typed from their values (Double, Integer,
+Boolean, String, or List of these for list attributes), also when only some nodes have a
+value, e.g. data added with :func:`~skm_tools.experimental_data.add_node_data`. ``style``
+is optional: it applies one of the SKM styles; without it, Cytoscape uses its default style.
 
 .. code-block:: python
 
    suid = cu.load_network(pss, title="PSS", style="skm")
+
+Cytoscape groups columns named ``namespace::name`` under their namespace in the table
+browser. ``namespaces`` puts attributes in a namespace by their name's prefix, only in
+Cytoscape (the networkx attributes keep their names). Style mappings then use the Cytoscape
+column names:
+
+.. code-block:: python
+
+   # "gwas maxLog10P" -> "gwas::maxLog10P", "gwas Rust maxLog10P" -> "gwas::Rust maxLog10P"
+   suid = cu.load_network(ckn_gwas, title="GWAS", style="skm", namespaces={"gwas ": "gwas"})
+   p4c.set_node_color_mapping("gwas::Rust maxLog10P", [5, 18], ["#fdd0a2", "#a63603"], network=suid)
+
+Cytoscape namespaces have one level, and column names ignore case.
 
 The SKM styles are bundled with skm-tools, and imported into Cytoscape the first time
 they are used (also with :func:`~skm_tools.cytoscape_utils.apply_builtin_style`). CKN and

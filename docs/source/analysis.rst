@@ -46,8 +46,9 @@ Experimental data
 =================
 
 :func:`~skm_tools.experimental_data.add_experimental_data` adds logFC and p-values as
-node attributes. It returns a copy, so several experiments can be added to separate
-copies of the same network. If several rows match a node (several genes of a functional
+node attributes. It changes the network in place (and returns it); with ``copy=True`` it
+annotates a copy instead, e.g. to add several experiments to separate copies of the same
+network. If several rows match a node (several genes of a functional
 cluster, or an id that is in the table more than once), the most significant is used:
 lowest p-value, then largest absolute logFC. Ids are matched exactly; normalise the table's
 index first if needed (e.g. ``df.index.str.upper()``). A warning is logged if no node
@@ -61,10 +62,24 @@ matches.
    df = pd.read_csv("deg.tsv", sep="\t", index_col=0)    # indexed by gene id
 
    # CKN nodes are genes: match on the node id
-   ckn_h2o2 = add_experimental_data(ckn, df, "logFC", "padj", prefix="H2O2 ")
+   add_experimental_data(ckn, df, "logFC", "padj", prefix="H2O2 ")
 
    # PSS nodes are functional clusters: match on their genes; the most significant gene is used
-   pss_h2o2 = add_experimental_data(pss, df, "logFC", "padj", match_attribute="ath_homologues")
+   # (in a copy: pss stays as it is)
+   pss_h2o2 = add_experimental_data(pss, df, "logFC", "padj", match_attribute="ath_homologues", copy=True)
+
+For other data, :func:`~skm_tools.experimental_data.add_node_data` adds any columns of a
+table, one row per id (aggregate first, e.g. per gene). It matches like
+``add_experimental_data``; on a translated CKN, match on ``translation`` to put data on all
+nodes of a target-species gene. If a node matches several ids (a list attribute),
+``rank_by`` picks the row with the highest value in that column.
+
+.. code-block:: python
+
+   from skm_tools.experimental_data import add_node_data
+
+   per_gene = gwas.groupby("geneID").agg(maxLog10P=("log10P", "max"))   # e.g. apricot GWAS
+   add_node_data(ckn_apricot, per_gene, match_attribute="translation", prefix="gwas ")
 
 .. _mapman:
 
@@ -83,6 +98,20 @@ work for both networks.
    # 26.11: External stimuli response.pathogen
    pss_pathogen = get_nodes_by_mapman(pss, "26.11")
    ckn_pathogen = get_nodes_by_mapman(ckn, "26.11")
+
+For other species, :func:`~skm_tools.annotations.mercator_gene_sets` reads a Mercator4 result
+file into MapMan gene sets (bin -> genes, each gene also in the parent bins of its bins), e.g. for
+an enrichment analysis with `gseapy <https://gseapy.readthedocs.io>`_:
+
+.. code-block:: python
+
+   import gseapy
+   from skm_tools.annotations import mercator_gene_sets
+
+   # bins of levels 1-3 with at least 5 genes; Mercator ids are lower-case protein ids
+   sets = mercator_gene_sets("parm_Mercator4v7_results.txt", levels=[1, 2, 3], min_size=5,
+                             exclude_bins=["35", "50"], id_to_gene=lambda i: i.split(".t")[0])
+   result = gseapy.enrich(gene_list=genes, gene_sets=sets, background=all_genes, outdir=None).results
 
 Minimum cuts
 ============

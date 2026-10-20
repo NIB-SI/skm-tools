@@ -465,14 +465,132 @@ def test_apply_builtin_style_unknown(p4c):
 
 
 def test_load_network(p4c):
-    p4c.networks.create_network_from_networkx.return_value = 7
+    p4c.networks.create_network_from_data_frames.return_value = 7
     p4c.styles.get_visual_style_names.return_value = ["SKM"]
     g = nx.DiGraph([("A", "B")])
     assert cu.load_network(g, "PSS", collection="Tutorial", style="skm") == 7
-    p4c.networks.create_network_from_networkx.assert_called_once_with(g, title="PSS", collection="Tutorial")
+    kwargs = p4c.networks.create_network_from_data_frames.call_args.kwargs
+    assert (kwargs["title"], kwargs["collection"], kwargs["node_id_list"]) == ("PSS", "Tutorial", "name")
     p4c.set_visual_style.assert_called_once_with("SKM", network=7)
 
 
 def test_load_network_without_style(p4c):
     cu.load_network(nx.DiGraph([("A", "B")]), "PSS")
     p4c.set_visual_style.assert_not_called()
+
+
+def test_column_types():
+    columns = {
+        "sparse": [1.5, None, None], "ints": [1, 2, 3], "ints_missing": [1, None, 2],
+        "big": [2**40, 1, 2], "mixed_numbers": [1, 2.5, None], "flag": [True, None, False],
+        "text": ["a", None, "b"], "lists": [["a", "b"], None, []], "num_lists": [[1, 2.5], [3], None],
+        "mixed": [["a"], "b", None], "nan": [float("nan"), None, None],
+    }
+    nodes = [{k: v[i] for k, v in columns.items()} for i in range(3)]
+    del nodes[1]["ints_missing"]          # attribute absent on a node
+    assert cu._column_types(nodes) == {
+        "sparse": ("Double", False), "ints": ("Integer", False), "ints_missing": ("Integer", False),
+        "big": ("Long", False), "mixed_numbers": ("Double", False), "flag": ("Boolean", False),
+        "text": ("String", False), "lists": ("String", True), "num_lists": ("Double", True),
+        "mixed": ("String", True),
+    }
+
+
+def test_load_network_creates_typed_columns_before_loading(p4c, caplog):
+    g = nx.MultiDiGraph([("A", "B"), ("A", "B"), ("B", "C")])
+    g.nodes["B"]["score"] = 1.5           # only on some nodes: Cytoscape would guess String
+    g.nodes["A"]["label"] = "a"
+    g.nodes["C"]["tissue"] = ["leaf", "root"]
+    g.edges["A", "B", 0]["interaction"] = "binding"
+    g.edges["A", "B", 1]["rank"] = 2
+    p4c.networks.create_network_from_data_frames.return_value = 99
+    p4c.tables.get_table_column_types.return_value = {"name": "String", "label": "Integer"}
+    p4c.edge_name_to_edge_suid.return_value = [11, 12, 13]
+
+    assert cu.load_network(g, "net", collection="coll") == 99
+
+    # the network is created from the structure only
+    kwargs = p4c.networks.create_network_from_data_frames.call_args.kwargs
+    assert list(kwargs["nodes"].columns) == ["name"]
+    assert kwargs["edges"].to_dict("records") == [
+        {"source": "A", "target": "B", "interaction": "binding"},
+        {"source": "A", "target": "B", "interaction": "interacts with"},
+        {"source": "B", "target": "C", "interaction": "interacts with"},
+    ]
+    # typed columns, except those that exist already
+    created = [c.kwargs["body"] for c in p4c.commands.cyrest_post.call_args_list]
+    assert {"name": "score", "type": "Double", "list": False} in created
+    assert {"name": "tissue", "type": "String", "list": True} in created
+    assert {"name": "rank", "type": "Integer", "list": False} in created
+    assert not any(b["name"] == "label" for b in created)
+    assert "Column 'label' of the node table is Integer, not String" in caplog.text
+    # then the values as JSON: missing values left out, lists as lists; edges by SUID, in order
+    p4c.edge_name_to_edge_suid.assert_called_once_with(
+        ["A (binding) B", "A (interacts with) B", "B (interacts with) C"], network=99, unique_list=True)
+    (node_op,), node_kw = p4c.commands.cyrest_put.call_args_list[0]
+    (edge_op,), edge_kw = p4c.commands.cyrest_put.call_args_list[1]
+    assert node_op == "networks/99/tables/defaultnode"
+    assert node_kw["body"]["key"] == "name" and node_kw["body"]["data"] == [
+        {"name": "A", "label": "a"}, {"name": "B", "score": 1.5}, {"name": "C", "tissue": ["leaf", "root"]}]
+    assert edge_op == "networks/99/tables/defaultedge"
+    assert edge_kw["body"]["key"] == "SUID" and edge_kw["body"]["data"] == [
+        {"SUID": 11}, {"SUID": 12, "rank": 2}, {"SUID": 13}]
+    assert type(edge_kw["body"]["data"][1]["rank"]) is int     # an int, though pandas had a float
+
+
+def test_load_network_without_attributes_or_edges(p4c):
+    g = nx.Graph()
+    g.add_node("A")
+    cu.load_network(g, "net")
+    assert p4c.networks.create_network_from_data_frames.call_args.kwargs["edges"] is None
+    p4c.commands.cyrest_put.assert_not_called()
+    p4c.commands.cyrest_post.assert_not_called()
+
+
+def test_cytoscape_names():
+    names = cu._cytoscape_names(
+        ["gwas maxLog10P", "gwas Rust maxLog10P", "gwas Rust SNPs", "translation", "node_type"],
+        {"gwas ": "gwas", "gwas Rust ": "rust", "translation": "translation"})
+    assert names == {
+        "gwas maxLog10P": "gwas::maxLog10P",
+        "gwas Rust maxLog10P": "rust::maxLog10P",            # the longest prefix
+        "gwas Rust SNPs": "rust::SNPs",
+        "translation": "translation::translation",          # attribute == prefix
+        "node_type": "node_type",
+    }
+    assert cu._cytoscape_names(["a", "b"], None) == {"a": "a", "b": "b"}
+
+
+def test_cytoscape_names_errors():
+    with pytest.raises(ValueError, match="one level"):
+        cu._cytoscape_names(["gwas x"], {"gwas ": "gwas::rust"})
+    with pytest.raises(ValueError, match="ignores case"):
+        cu._cytoscape_names(["gwas x", "GWAS x"], {"gwas ": "ns", "GWAS ": "NS"})
+
+
+def test_load_network_namespaces(p4c):
+    g = nx.DiGraph([("A", "B")])
+    g.nodes["A"]["gwas maxLog10P"] = 5.0
+    g.nodes["A"]["node_type"] = "PlantCoding"
+    g.edges["A", "B"]["gwas score"] = 1.5
+    g.edges["A", "B"]["interaction"] = "binding"
+    p4c.networks.create_network_from_data_frames.return_value = 99
+    p4c.tables.get_table_column_types.return_value = {"name": "String", "GWAS::maxLog10P": "Double"}
+    p4c.edge_name_to_edge_suid.return_value = [11]
+
+    cu.load_network(g, "net", namespaces={"gwas ": "gwas"})
+
+    created = [c.kwargs["body"]["name"] for c in p4c.commands.cyrest_post.call_args_list]
+    assert created == ["node_type", "gwas::score"]       # gwas::maxLog10P exists (other case)
+    (_, node_kw), (_, edge_kw) = p4c.commands.cyrest_put.call_args_list
+    assert node_kw["body"]["data"] == [{"name": "A", "gwas::maxLog10P": 5.0, "node_type": "PlantCoding"},
+                                       {"name": "B"}]
+    assert edge_kw["body"]["data"] == [{"SUID": 11, "gwas::score": 1.5}]
+    assert "gwas maxLog10P" in g.nodes["A"]                 # the graph is unchanged
+
+
+def test_show_node_images_corner_position(p4c):
+    cu.show_node_images("S", "badge", slot=2, position="top-right", size=24)
+    defaults = [c.args[0] for c in p4c.style_defaults.set_visual_property_default.call_args_list]
+    assert {"visualProperty": "NODE_CUSTOMGRAPHICS_POSITION_2", "value": "NE,C,c,0.00,0.00"} in defaults
+    assert {"visualProperty": "NODE_CUSTOMGRAPHICS_SIZE_2", "value": 24} in defaults

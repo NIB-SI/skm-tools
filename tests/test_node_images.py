@@ -80,3 +80,19 @@ def test_chart_column_rejects_commas_and_quotes_in_labels():
     for label in ["10 min, mock", 'the "mock"']:
         with pytest.raises(ValueError, match="can't contain"):
             ni.chart_column(df, ["t1"], "#E41A1C", labels=[label])
+
+
+def test_number_badges(tmp_path):
+    badges = ni.number_badges([1, 12, 100], tmp_path / "badges", color="#123456")
+    assert set(badges) == {1, 12, 100}
+    assert badges[12] == tmp_path / "badges" / "badge_12.svg"
+    svg = badges[12].read_text()
+    assert svg.startswith("<svg") and ">12</text>" in svg and 'fill="#123456"' in svg
+    # longer numbers get a smaller font
+    size = lambda p: float(p.read_text().split('font-size="')[1].split('"')[0])
+    assert size(badges[1]) > size(badges[12]) > size(badges[100])
+
+
+def test_number_badges_escapes_text(tmp_path):
+    svg = ni.number_badges(["<1"], tmp_path)["<1"].read_text()
+    assert ">&lt;1</text>" in svg

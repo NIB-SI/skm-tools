@@ -3,7 +3,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from skm_tools.experimental_data import add_experimental_data
+from skm_tools.experimental_data import add_experimental_data, add_node_data
 
 
 @pytest.fixture
@@ -20,10 +20,18 @@ def _graph():
     return g
 
 
-def test_returns_copy(df):
+def test_in_place_by_default(df):
     g = _graph()
     h = add_experimental_data(g, df, "logFC", "padj")
+    assert h is g
+    assert g.nodes["G1"]["logFC"] == 1.5
+
+
+def test_copy(df):
+    g = _graph()
+    h = add_experimental_data(g, df, "logFC", "padj", copy=True)
     assert h is not g
+    assert h.nodes["G1"]["logFC"] == 1.5
     assert "logFC" not in g.nodes["G1"]
 
 
@@ -90,7 +98,7 @@ def test_duplicated_ids_without_pvalue():
 def test_reannotating_removes_old_values(df):
     h = add_experimental_data(_graph(), df, "logFC", "padj")
     df2 = pd.DataFrame({"logFC": [0.5], "padj": [0.2]}, index=["G2"])
-    h2 = add_experimental_data(h, df2, "logFC", "padj")
+    h2 = add_experimental_data(h, df2, "logFC", "padj", copy=True)
     assert h2.nodes["G2"]["logFC"] == 0.5
     assert not {"logFC", "pvalue", "significant", "matched_ids"} & set(h2.nodes["G1"])
     # another prefix is kept
@@ -116,4 +124,92 @@ def test_nullable_dtypes():
 def test_no_match_warns(df, caplog):
     df.index = df.index.str.lower()
     add_experimental_data(_graph(), df, "logFC", "padj")
+    assert "No node matched the df index" in caplog.text
+
+
+# add_node_data
+
+@pytest.fixture
+def gene_df():
+    return pd.DataFrame(
+        {"maxLog10P": [5.0, 7.5, np.nan], "trait": ["Rust", "Blight", None],
+         "traits": [["Rust"], ["Blight", "Rust"], []]},
+        index=["P1", "P2", "P3"],
+    )
+
+
+def _translated():
+    # two Arabidopsis genes translated to the same apricot gene P1, as integrate_translation_ckn does
+    g = nx.MultiDiGraph([("A1_P1", "A2_P1"), ("A2_P1", "A3_P2"), ("A3_P2", "M")])
+    for n in ("A1_P1", "A2_P1", "A3_P2"):
+        g.nodes[n]["translation"] = n.split("_")[1]
+    g.add_node("FC", homologues=["P2", "P1", "X"])
+    return g
+
+
+def test_node_data_by_node_id(gene_df):
+    g = nx.Graph([("P1", "P2"), ("P2", "N")])
+    h = add_node_data(g, gene_df)
+    assert h is g
+    assert h.nodes["P2"] == {"maxLog10P": 7.5, "trait": "Blight", "traits": ["Blight", "Rust"],
+                             "matched_ids": ["P2"]}
+    assert h.nodes["N"] == {}
+
+
+def test_node_data_same_id_on_several_nodes(gene_df):
+    h = add_node_data(_translated(), gene_df, match_attribute="translation", prefix="gwas ")
+    for n in ("A1_P1", "A2_P1"):
+        assert h.nodes[n]["gwas maxLog10P"] == 5.0
+        assert h.nodes[n]["gwas matched_ids"] == ["P1"]
+    assert h.nodes["A3_P2"]["gwas trait"] == "Blight"
+    assert "gwas trait" not in h.nodes["M"]
+
+
+def test_node_data_columns_and_types(gene_df):
+    h = add_node_data(_translated(), gene_df, columns=["maxLog10P"], match_attribute="translation")
+    assert "trait" not in h.nodes["A1_P1"]
+    assert type(h.nodes["A1_P1"]["maxLog10P"]) is float
+
+
+def test_node_data_nan_is_none(gene_df):
+    g = nx.Graph([("P3", "N")])
+    h = add_node_data(g, gene_df)
+    assert h.nodes["P3"]["maxLog10P"] is None and h.nodes["P3"]["trait"] is None
+    assert h.nodes["P3"]["traits"] == []
+
+
+def test_node_data_list_attribute_rank_by(gene_df):
+    g = _translated()
+    # default: first matching row in df order
+    assert add_node_data(g, gene_df, match_attribute="homologues").nodes["FC"]["trait"] == "Rust"
+    h = add_node_data(g, gene_df, match_attribute="homologues", rank_by="maxLog10P")
+    assert h.nodes["FC"]["trait"] == "Blight"
+    assert h.nodes["FC"]["matched_ids"] == ["P1", "P2"]
+    h = add_node_data(g, gene_df, match_attribute="homologues", rank_by="maxLog10P", ascending=True)
+    assert h.nodes["FC"]["trait"] == "Rust"
+
+
+def test_node_data_copy_and_reannotate(gene_df):
+    g = _translated()
+    h = add_node_data(g, gene_df, match_attribute="translation", copy=True)
+    assert "trait" not in g.nodes["A1_P1"]
+    h2 = add_node_data(h, gene_df.loc[["P2"]], match_attribute="translation")
+    assert not {"maxLog10P", "trait", "matched_ids"} & set(h2.nodes["A1_P1"])
+    assert h2.nodes["A3_P2"]["trait"] == "Blight"
+
+
+def test_node_data_duplicated_index_raises(gene_df):
+    with pytest.raises(ValueError, match="aggregate"):
+        add_node_data(_translated(), pd.concat([gene_df, gene_df]))
+
+
+def test_node_data_missing_column_raises(gene_df):
+    with pytest.raises(KeyError):
+        add_node_data(_translated(), gene_df, columns=["pvalue"])
+    with pytest.raises(KeyError):
+        add_node_data(_translated(), gene_df, rank_by="pvalue")
+
+
+def test_node_data_no_match_warns(gene_df, caplog):
+    add_node_data(_translated(), gene_df)
     assert "No node matched the df index" in caplog.text
