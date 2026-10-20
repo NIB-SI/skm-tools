@@ -52,7 +52,9 @@ def ckn_to_networkx(
         ``filter_ckn_edges(g, filter_function=lambda d: d["directed"])``.
     create_using : networkx graph class
         Graph class to create (default ``networkx.DiGraph``; ``networkx.MultiDiGraph``
-        keeps parallel edges).
+        keeps parallel edges). CKN can have two edges between the same nodes, of different
+        types (e.g. ABI4 binds RGL2, and activates its transcription): a DiGraph keeps the
+        last one of each direction, a MultiDiGraph all of them.
     data_dir : str or pathlib.Path
         Folder for the default file names (default: the current folder).
 
