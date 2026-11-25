@@ -68,6 +68,29 @@ The universe matters: random genes should come from the genes that could have be
 those expressed). Genes of the universe without edges count too (degree 0), if they are
 nodes of the graph.
 
+Transcription factors behind a gene set
+=======================================
+
+:func:`~skm_tools.ckn.tf_target_enrichment` tests, for every TF with transcription factor
+regulation edges in CKN, whether its targets are over-represented among some genes (e.g. the
+DEGs): a one-sided hypergeometric test against the universe genes that some TF regulates, with
+Benjamini-Hochberg FDR over the TFs. With directions (+1 up, -1 down), it also gives an
+activity score: over the DE targets with a signed edge, the mean of sign(edge) x direction,
++1 if they are all consistent with a more active TF, -1 with a less active one. TFs with very
+many targets (e.g. from ChIP-seq) reach significance at small folds, so consider a minimum
+``fold`` too. Load CKN as a :class:`networkx.MultiDiGraph`: a DiGraph keeps one edge per node
+pair, so a binding edge can hide a regulation edge.
+
+.. code-block:: python
+
+   import networkx as nx
+   from skm_tools.ckn import ckn_to_networkx, filter_ckn_edges, tf_target_enrichment
+
+   ckn = ckn_to_networkx(create_using=nx.MultiDiGraph)
+   filter_ckn_edges(ckn, keep_edge_ranks=[0, 1, 2])
+   r = tf_target_enrichment(ckn, {"AT1G01010": 1, "AT2G38470": -1, ...}, universe=measured_genes)
+   r[(r.padj < 0.05) & (r.fold >= 1.5)]
+
 Experimental data
 =================
 
@@ -138,6 +161,17 @@ an enrichment analysis with `gseapy <https://gseapy.readthedocs.io>`_:
    sets = mercator_gene_sets("parm_Mercator4v7_results.txt", levels=[1, 2, 3], min_size=5,
                              exclude_bins=["35", "50"], id_to_gene=lambda i: i.split(".t")[0])
    result = gseapy.enrich(gene_list=genes, gene_sets=sets, background=all_genes, outdir=None).results
+
+For Arabidopsis, :func:`~skm_tools.annotations.read_plantgsea` reads a `PlantGSEA
+<http://structuralbiology.cau.edu.cn/PlantGSEA/>`_ download (GO, literature signatures, KEGG,
+AraCyc, TF targets, ...) into a table, and :func:`~skm_tools.annotations.plantgsea_gene_sets`
+into gene sets; PSS pathways as gene sets come from :func:`~skm_tools.pss.pathway_gene_sets`.
+
+.. code-block:: python
+
+   from skm_tools.annotations import plantgsea_gene_sets
+
+   sets = plantgsea_gene_sets("Ara.DetailInfo_2026-10-28.txt", sources=["GO_BP", "Literature"], min_size=10)
 
 Minimum cuts
 ============

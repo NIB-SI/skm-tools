@@ -96,3 +96,16 @@ def test_number_badges(tmp_path):
 def test_number_badges_escapes_text(tmp_path):
     svg = ni.number_badges(["<1"], tmp_path)["<1"].read_text()
     assert ">&lt;1</text>" in svg
+
+
+def test_heatmap_images(tmp_path):
+    pytest.importorskip("matplotlib")
+    import pandas as pd
+    from skm_tools.node_images import heatmap_images, match_files_to_nodes
+    lfc = pd.DataFrame({"4h": [1.5, -2.0], "24h": [0.2, None]}, index=["AT1G01010", "RISC|vsiRNA"])
+    images = heatmap_images(lfc, tmp_path, [["4h"], ["24h"]], marks=lfc.abs() >= 1)
+    assert set(images) == {"AT1G01010", "RISC|vsiRNA"} and all(p.exists() for p in images.values())
+    assert match_files_to_nodes(tmp_path, lfc.index) == images
+    mtime = images["AT1G01010"].stat().st_mtime_ns
+    heatmap_images(lfc, tmp_path, [["4h"], ["24h"]])                       # existing files are kept
+    assert images["AT1G01010"].stat().st_mtime_ns == mtime

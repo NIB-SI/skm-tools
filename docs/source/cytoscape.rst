@@ -85,6 +85,29 @@ To change a style for one analysis, copy it first (see
 :func:`~skm_tools.cytoscape_utils.copy_style`), so the original stays as it is: the SKM
 styles are shared by every network they are applied to.
 
+Marking nodes with a style mapping
+==================================
+
+Instead of bypasses (see Highlighting), nodes can be marked through a column and a style
+mapping, which stays with the data: :func:`~skm_tools.cytoscape_utils.flag_column` sets a node
+attribute to a flag for some nodes and to another attribute (default ``node_type``) for the
+rest, and :func:`~skm_tools.cytoscape_utils.extend_discrete_mapping` maps a visual property on
+that column, keeping the entries of an existing mapping (e.g. the SKM shapes per
+``node_type``) and adding the flags.
+
+.. code-block:: python
+
+   cu.flag_column(g, "shape_key", {tf: "TF" for tf in tfs})
+   cu.flag_column(g, "border_flag", {n: "robust DEG" for n in robust})
+   suid = cu.load_network(g, "DEGs", style="skm", significant_digits=3)
+   style = cu.copy_style("SKM", "SKM-flags", networks=[suid])
+   cu.extend_discrete_mapping(style, "NODE_SHAPE", "shape_key", {"TF": "DIAMOND"}, network=suid)
+   cu.extend_discrete_mapping(style, "NODE_BORDER_PAINT", "border_flag", {"robust DEG": "#e0a100"}, network=suid)
+   cu.extend_discrete_mapping(style, "NODE_BORDER_WIDTH", "border_flag", {"robust DEG": 6}, network=suid)
+
+``significant_digits`` in :func:`~skm_tools.cytoscape_utils.load_network` rounds the float
+values loaded into the tables (here to 3 significant digits), for smaller sessions.
+
 Highlighting
 ============
 
@@ -197,6 +220,20 @@ node. This takes three steps:
    cu.load_node_images(images, "heatmap", network=suid)
    style = cu.copy_style("SKM", "SKM-heatmaps", networks=[suid])
    cu.show_node_images(style, "heatmap")
+
+:func:`~skm_tools.node_images.heatmap_images` draws such images: one small heatmap per node
+from a table (e.g. log2FC per time point and dose), with a star on marked cells (e.g. DE), and
+returns node -> image path for :func:`~skm_tools.cytoscape_utils.load_node_images` (needs
+matplotlib).
+
+.. code-block:: python
+
+   from skm_tools.node_images import heatmap_images
+
+   # lfc: one row per gene, columns "4h IC50", "4h IC99", "24h IC50", "24h IC99"
+   images = heatmap_images(lfc, "heatmaps", [["4h IC50", "4h IC99"], ["24h IC50", "24h IC99"]],
+                           marks=padj < 0.05)
+   cu.load_node_images(images, "heatmap", network=suid)
 
 The helpers that don't need Cytoscape (:func:`~skm_tools.node_images.match_files_to_nodes`,
 :func:`~skm_tools.node_images.node_file_key`, :func:`~skm_tools.node_images.chart_column`,

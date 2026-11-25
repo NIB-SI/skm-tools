@@ -93,3 +93,20 @@ def test_mercator_gene_sets_filters(tmp_path):
     # without id_to_gene: the identifiers
     assert mercator_gene_sets(path, levels=[3])["1.1.1_Photosynthesis.photophosphorylation.photosystem II"] == [
         "pruarm.1g000100.t1.p1_1", "pruarm.1g000100.t2.p1_1"]
+
+
+def test_plantgsea(tmp_path):
+    from skm_tools.annotations import plantgsea_gene_sets, read_plantgsea
+    rows = [
+        ["SET_A", "Literature", "Arabidopsis thaliana", "123", "Symbol", "x", "y", "", "Set A up", "info",
+         "AT1G01010,AT1G01020,at1g01030,AT1G01020"],
+        ["SET_B", "GO_BP", "Arabidopsis thaliana", "", "Symbol", "x", "y", "", "Set B", "info", "AT2G01010"],
+    ]
+    f = tmp_path / "Ara.DetailInfo.txt"
+    f.write_text("\n".join("\t".join(r) for r in rows) + "\n", encoding="latin-1")
+    df = read_plantgsea(f)
+    assert list(df.columns) == ["set", "source", "reference", "description", "genes"]
+    assert df.genes[0] == ["AT1G01010", "AT1G01020", "AT1G01020"]       # only AGI codes
+    assert plantgsea_gene_sets(f) == {"SET_A": ["AT1G01010", "AT1G01020"], "SET_B": ["AT2G01010"]}
+    assert plantgsea_gene_sets(f, sources="GO_BP") == {"SET_B": ["AT2G01010"]}
+    assert plantgsea_gene_sets(f, min_size=2) == {"SET_A": ["AT1G01010", "AT1G01020"]}

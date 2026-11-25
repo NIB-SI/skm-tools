@@ -819,3 +819,65 @@ def remove_duplicated_binding_edges(g):
     g.remove_edges_from(edges_to_remove)
     logger.info("Removed %d edges from the network.", len(edges_to_remove))
     return edges_to_remove
+
+
+# ---------------------------------------------------------------------------
+# Metabolism and pathways
+# ---------------------------------------------------------------------------
+
+def metabolite_enzymes(g):
+    '''The enzymes of the reactions that produce and that consume each metabolite.
+
+    From the catalysis reactions: a catalyst's edge to a reaction's product (``target_role`` ``"product"``) and
+    to its substrate (``"substrate"``). Use the network before :func:`simplify_pss`, which merges the edges of
+    different reactions.
+
+    Parameters
+    ----------
+    g : networkx.MultiDiGraph
+        PSS interaction network or gene network.
+
+    Returns
+    -------
+    pandas.DataFrame
+        One row per enzyme, metabolite and reaction: ``enzyme``, ``metabolite``, ``role`` (``"producer"`` or
+        ``"consumer"``), ``reaction_id``, ``metabolite_type`` (``Metabolite`` or ``MetaboliteFamily``).
+    '''
+    _check_not_reaction_graph(g, "metabolite_enzymes")
+    role = {"product": "producer", "substrate": "consumer"}
+    rows = []
+    for u, v, d in g.edges(data=True):
+        if (d.get("reaction_type") == "catalysis" and d.get("source_role") == "catalyst"
+                and d.get("target_role") in role
+                and g.nodes[v].get("node_type") in ("Metabolite", "MetaboliteFamily")):
+            for rx in as_list(d.get("reaction_id")) or [None]:
+                rows.append((u, v, role[d["target_role"]], rx, g.nodes[v]["node_type"]))
+    return (pd.DataFrame(rows, columns=["enzyme", "metabolite", "role", "reaction_id", "metabolite_type"])
+            .drop_duplicates().reset_index(drop=True))
+
+
+def pathway_gene_sets(g, attribute="all_pathways", genes_only=True):
+    '''PSS pathways as node sets, e.g. for an enrichment analysis.
+
+    Parameters
+    ----------
+    g : networkx.Graph
+        PSS gene network (or interaction network).
+    attribute : str
+        Node attribute with the pathways (default ``"all_pathways"``; ``"pathway"`` for the main ones).
+    genes_only : bool
+        Only genes (nodes with a ``species``; default), not metabolites or complexes.
+
+    Returns
+    -------
+    dict
+        Pathway -> sorted list of nodes.
+    '''
+    sets = {}
+    for n, d in g.nodes(data=True):
+        if genes_only and not d.get("species"):
+            continue
+        for pw in as_list(d.get(attribute)) or []:
+            sets.setdefault(pw, set()).add(n)
+    return {pw: sorted(nodes, key=str) for pw, nodes in sorted(sets.items())}
+

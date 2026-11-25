@@ -5,6 +5,7 @@ import shutil
 from unittest.mock import patch
 
 import networkx as nx
+import numpy as np
 import pytest
 
 from skm_tools.ckn import CKN_RANKS, ckn_to_networkx, filter_ckn_edges, filter_ckn_nodes, rank_counts
@@ -276,3 +277,41 @@ class TestTranscriptionFactors:
         assert "AT2G43010" in tfs
         assert all(any(d["type"] == "transcription factor regulation" for *_, d in g.out_edges(t, data=True))
                    for t in tfs)
+
+
+class TestTfTargetEnrichment:
+    @staticmethod
+    def graph():
+        from skm_tools.ckn import TF_REGULATION
+        g = nx.MultiDiGraph()
+        # TF1 regulates G0-G9 (activating), TF2 regulates G10-G29, TF3 has only 2 targets
+        g.add_edges_from((("TF1", f"G{i}", dict(type=TF_REGULATION, interaction="positive-influence"))
+                          for i in range(10)))
+        g.add_edges_from((("TF2", f"G{i}", dict(type=TF_REGULATION, interaction="unknown-influence"))
+                          for i in range(10, 30)))
+        g.add_edges_from((("TF3", f"G{i}", dict(type=TF_REGULATION)) for i in (30, 31)))
+        g.add_edge("TF1", "G0", type="binding", interaction="unknown-influence")     # not a regulation edge
+        g.add_nodes_from(f"N{i}" for i in range(50))                                 # not regulated
+        return g
+
+    def test_enriched_tf_and_background(self):
+        from skm_tools.ckn import tf_target_enrichment
+        degs = {f"G{i}": -1 for i in range(8)} | {"G12": 1, "N1": 1}
+        r = tf_target_enrichment(self.graph(), degs)
+        assert list(r.tf) == ["TF1", "TF2"]                  # TF3: fewer than 5 targets
+        assert r.attrs == {"background": 32, "n_degs": 9}    # N1 is not regulated: not in the background
+        tf1 = r.iloc[0]
+        assert (tf1.targets, tf1.hits, tf1.down_hits, tf1.up_hits) == (10, 8, 8, 0)
+        assert tf1.fold == pytest.approx(8 / (10 * 9 / 32))
+        assert tf1.padj < 0.01
+        # activating edges to down-regulated targets: a less active TF
+        assert (tf1.n_signed, tf1.activity_score) == (8, -1.0)
+        assert r.iloc[1].n_signed == 0 and np.isnan(r.iloc[1].activity_score)
+
+    def test_universe_and_plain_node_list(self):
+        from skm_tools.ckn import tf_target_enrichment
+        r = tf_target_enrichment(self.graph(), [f"G{i}" for i in range(5)], universe=[f"G{i}" for i in range(20)],
+                                 min_targets=1)
+        assert r.attrs["background"] == 20
+        assert set(r.tf) == {"TF1", "TF2"}
+        assert r.set_index("tf").at["TF1", "up_hits"] == 0      # no directions given

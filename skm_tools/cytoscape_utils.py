@@ -195,7 +195,7 @@ def set_style(style, network=None):
     p4c.set_visual_style(style, network=network)
 
 
-def load_network(g, title, collection=None, style=None, namespaces=None):
+def load_network(g, title, collection=None, style=None, namespaces=None, significant_digits=None):
     '''Load a networkx graph into Cytoscape.
 
     Parameters
@@ -219,6 +219,9 @@ def load_network(g, title, collection=None, style=None, namespaces=None):
         (``{"translation": "translation"}``: ``translation::translation``). Other attributes,
         and the networkx graph itself, are unchanged. Style mappings and other functions then
         use the Cytoscape column names.
+    significant_digits : int, optional
+        Round float node and edge values to this many significant digits (e.g. 3: 0.000123456 -> 0.000123,
+        13.4651 -> 13.5) in the loaded tables, for smaller sessions; the networkx graph is unchanged.
 
     Returns
     -------
@@ -250,8 +253,9 @@ def load_network(g, title, collection=None, style=None, namespaces=None):
     node_columns = _cytoscape_names(node_types, namespaces)
     edge_columns = _cytoscape_names(edge_types, namespaces)
 
-    nodes = pd.DataFrame.from_records([{**attrs, "name": str(n)} for n, attrs in g.nodes(data=True)])
-    edges = pd.DataFrame.from_records([{**attrs, "source": str(u), "target": str(v)}
+    nodes = pd.DataFrame.from_records([{**_rounded(attrs, significant_digits), "name": str(n)}
+                                       for n, attrs in g.nodes(data=True)])
+    edges = pd.DataFrame.from_records([{**_rounded(attrs, significant_digits), "source": str(u), "target": str(v)}
                                        for u, v, attrs in g.edges(data=True)])
     if not edges.empty:
         interaction = edges["interaction"] if "interaction" in edges else pd.Series(None, index=edges.index)
@@ -274,6 +278,14 @@ def load_network(g, title, collection=None, style=None, namespaces=None):
     if style:
         apply_builtin_style(style, network=suid)
     return suid
+
+
+def _rounded(attrs, digits):
+    '''attrs with float values rounded to `digits` significant digits (None: unchanged).'''
+    if digits is None:
+        return attrs
+    return {k: float(f"{v:.{digits}g}") if isinstance(v, (float, np.floating)) and np.isfinite(v) else v
+            for k, v in attrs.items()}
 
 
 def _cytoscape_names(attributes, namespaces):
@@ -782,6 +794,75 @@ def copy_style(style, new_style, networks=(), overwrite=False):
     for network in networks:
         set_style(new_style, network)
     return new_style
+
+
+def flag_column(g, column, flags, fallback="node_type"):
+    '''Set a node attribute that marks some nodes and otherwise holds another attribute, for a style mapping.
+
+    E.g. ``flag_column(g, "border_flag", {"AT2G38470": "robust DEG"})`` gives WRKY33 ``"robust DEG"`` and every
+    other node its ``node_type``, so one discrete mapping on ``border_flag`` can colour the flagged nodes and keep
+    the usual colour per node type for the rest (see :func:`extend_discrete_mapping`). Changes `g` in place.
+
+    Parameters
+    ----------
+    g : networkx.Graph
+    column : str
+        Attribute to set.
+    flags : dict
+        Node -> flag (str). Nodes not in `g` are ignored.
+    fallback : str or None
+        Attribute whose value the other nodes get (default ``"node_type"``); None: an empty string.
+
+    Returns
+    -------
+    networkx.Graph
+        `g`.
+    '''
+    for n, d in g.nodes(data=True):
+        d[column] = flags.get(n) or (d.get(fallback, "") if fallback else "")
+    return g
+
+
+def extend_discrete_mapping(style, visual_property, column, extra, base_style=None, network=None):
+    '''Map a visual property on a flag column: the entries of an existing discrete mapping, plus new ones.
+
+    For marking nodes with a style mapping instead of bypasses: e.g. the SKM style maps ``NODE_SHAPE`` on
+    ``node_type``; with a column that holds ``"TF"`` for transcription factors and the ``node_type`` otherwise
+    (:func:`flag_column`), ``extend_discrete_mapping(style, "NODE_SHAPE", "shape_key", {"TF": "DIAMOND"})``
+    draws TFs as diamonds and every other node with its usual shape. Without an existing mapping, only `extra`
+    is mapped (unmapped values get the style's default).
+
+    Parameters
+    ----------
+    style : str
+        Style to change (e.g. a copy of the SKM style, see :func:`copy_style`).
+    visual_property : str
+        E.g. ``"NODE_SHAPE"``, ``"NODE_BORDER_PAINT"``, ``"NODE_BORDER_WIDTH"``, ``"NODE_FILL_COLOR"``.
+    column : str
+        Node column to map on. Must exist in `network` (py4cytoscape checks it).
+    extra : dict
+        Column value -> property value, added to (or replacing) the existing entries.
+    base_style : str, optional
+        Style whose mapping of `visual_property` provides the existing entries (default: `style`).
+    network : int or str, optional
+        Network with the column (default: the current network).
+
+    Returns
+    -------
+    dict
+        The mapped column value -> property value.
+    '''
+    entries = {}
+    try:
+        current = p4c.get_style_mapping(base_style or style, visual_property)
+        if current.get("mappingType") == "discrete":
+            entries = {m["key"]: m["value"] for m in current["map"]}
+    except Exception:          # no mapping of this property
+        logger.info("%s has no %s mapping: mapping only the new values", base_style or style, visual_property)
+    entries.update(extra)
+    p4c.update_style_mapping(style, p4c.map_visual_property(visual_property, column, "d", list(entries),
+                                                            list(entries.values()), network=network))
+    return entries
 
 
 def delete_other_networks(keep):

@@ -131,6 +131,8 @@ def transcription_factors(g, mapman_bins=None):
     regulation"``), and optionally the nodes annotated with MapMan bins, e.g. ``"14.5"`` (RNA
     biosynthesis.DNA-binding transcriptional regulation in MapMan4), for TFs without regulation edges in CKN.
     Only the edges in `g` count: filter the edges first (:func:`filter_ckn_edges`) to restrict to some ranks.
+    Load CKN as a MultiDiGraph (``ckn_to_networkx(create_using=nx.MultiDiGraph)``): a DiGraph keeps one edge per
+    node pair and direction, so a binding edge can hide a regulation edge between the same genes.
 
     Parameters
     ----------
@@ -150,6 +152,79 @@ def transcription_factors(g, mapman_bins=None):
         tfs |= set(get_nodes_by_mapman(g, mapman_bins))
     logger.info("%d transcription factors (%d with TF regulation edges)", len(tfs), n_edges)
     return tfs
+
+
+_SIGN = {"positive-influence": 1, "negative-influence": -1}
+
+
+def tf_target_enrichment(g, degs, universe=None, min_targets=5):
+    '''Transcription factors whose CKN targets are over-represented among differentially expressed genes.
+
+    For each TF (source of transcription factor regulation edges in `g`), a one-sided hypergeometric test of its
+    targets among the DEGs. The background is the universe genes with at least one incoming transcription factor
+    regulation edge in `g`: genes no TF is known to regulate can't be hits, and would make every TF look enriched.
+    Only the edges in `g` count: filter the ranks first (:func:`filter_ckn_edges`) if needed.
+    Load CKN as a MultiDiGraph (``ckn_to_networkx(create_using=nx.MultiDiGraph)``): a DiGraph keeps one edge per
+    node pair and direction, so a binding edge can hide a regulation edge between the same genes.
+
+    The activity score is computed over the TF's DE targets with a signed edge (``interaction``
+    positive-influence / negative-influence; all edges from the TF to the target must agree) and a direction:
+    the mean of sign(edge) x direction(target), +1 if all are consistent with a more active TF, -1 with a less
+    active one.
+
+    Parameters
+    ----------
+    g : networkx.Graph
+        CKN, e.g. from :func:`ckn_to_networkx` (DiGraph or MultiDiGraph).
+    degs : dict or iterable
+        The DEGs: node -> direction (+1 up, -1 down, 0 unknown or mixed), or just the nodes (no direction).
+    universe : iterable, optional
+        The genes that could be DE, e.g. those measured. Default: every node of `g`.
+    min_targets : int
+        Test only TFs with at least this many targets in the background (default 5).
+
+    Returns
+    -------
+    pandas.DataFrame
+        One row per tested TF, sorted by p: ``tf``, ``targets`` (in the background), ``hits`` (DE targets),
+        ``up_hits``, ``down_hits``, ``expected``, ``fold``, ``p``, ``padj`` (Benjamini-Hochberg over the TFs),
+        ``n_signed``, ``activity_score`` (NaN without signed hits), ``hit_genes`` (list). The background size and
+        the number of DEGs in it are in ``attrs["background"]`` and ``attrs["n_degs"]``.
+    '''
+    import pandas as pd
+    from .stats import bh_fdr, hypergeom_sf
+
+    direction = dict(degs) if isinstance(degs, dict) else {d: 0 for d in degs}
+    signs = {}
+    for u, v, d in g.edges(data=True):
+        if d.get("type") == TF_REGULATION and u != v:
+            signs.setdefault(u, {}).setdefault(v, set()).add(_SIGN.get(d.get("interaction"), 0))
+    regulated = {v for t in signs.values() for v in t}
+    background = regulated & (set(universe) if universe is not None else set(g))
+    hits_all = set(direction) & background
+    rows = []
+    for tf, tg in signs.items():
+        targets = set(tg) & background
+        if len(targets) < min_targets:
+            continue
+        hits = targets & hits_all
+        signed = [next(iter(tg[h])) * direction[h] for h in hits if len(tg[h]) == 1 and 0 not in tg[h]
+                  and direction[h] != 0]
+        expected = len(targets) * len(hits_all) / len(background)
+        rows.append(dict(tf=tf, targets=len(targets), hits=len(hits),
+                         up_hits=sum(direction[h] > 0 for h in hits), down_hits=sum(direction[h] < 0 for h in hits),
+                         expected=expected, fold=len(hits) / expected if expected else float("nan"),
+                         p=hypergeom_sf(len(hits), len(background), len(targets), len(hits_all)),
+                         n_signed=len(signed), activity_score=sum(signed) / len(signed) if signed else float("nan"),
+                         hit_genes=sorted(hits, key=str)))
+    cols = ["tf", "targets", "hits", "up_hits", "down_hits", "expected", "fold", "p", "padj", "n_signed",
+            "activity_score", "hit_genes"]
+    res = pd.DataFrame(rows, columns=[c for c in cols if c != "padj"])
+    res["padj"] = bh_fdr(res.p.to_numpy())
+    res = res[cols].sort_values(["p", "tf"]).reset_index(drop=True)
+    res.attrs.update(background=len(background), n_degs=len(hits_all))
+    logger.info("%d TFs tested (background %d genes, %d DEGs)", len(res), len(background), len(hits_all))
+    return res
 
 
 def filter_ckn_edges(g,

@@ -186,3 +186,20 @@ binding edge, for a less cluttered drawing. Don't use it before path or neighbou
    simple = simplify_pss(pss)
    planned = remove_and_rewire(simple, ["JA-Ile"], dry_run=True)   # [(u, v, data), ...]
    reasons = remove_and_rewire(simple, ["JA-Ile"])
+
+Metabolism and pathways
+=======================
+
+:func:`~skm_tools.pss.metabolite_enzymes` lists, per metabolite, the enzymes of the reactions
+that produce it (catalyst → product) and that consume it (catalyst → substrate), e.g. to read
+expression changes of the enzymes as a change in the capacity to make a metabolite (not its
+flux). Use the network before :func:`~skm_tools.pss.simplify_pss`, which merges reactions.
+:func:`~skm_tools.pss.pathway_gene_sets` gives the PSS pathways as gene sets.
+
+.. code-block:: python
+
+   from skm_tools.pss import metabolite_enzymes, pathway_gene_sets
+
+   enzymes = metabolite_enzymes(pss_ath)     # enzyme, metabolite, role (producer / consumer), reaction_id
+   sets = pathway_gene_sets(pss_ath)         # e.g. "Hormone - Jasmonate (JA)" -> genes
+

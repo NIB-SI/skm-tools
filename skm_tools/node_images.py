@@ -83,6 +83,84 @@ def match_files_to_nodes(folder, nodes, key=node_file_key, aliases=None, extensi
     return matched
 
 
+def heatmap_images(values, folder, layout, marks=None, vmin=-4, vmax=4,
+                   colors=("#2357c4", "#ffffff", "#c4361b"), missing_color="lightgrey", overwrite=False):
+    '''A small heatmap image per node, e.g. log2FC per time point x dose, for Cytoscape node images.
+
+    Each image is a grid of cells: ``layout`` gives the columns of `values` per grid row. Values are coloured on
+    a diverging scale centred at 0; missing values are grey; cells where `marks` is True get a star (e.g. DE).
+    Needs matplotlib.
+
+    Parameters
+    ----------
+    values : pandas.DataFrame
+        One row per node (the index), with the columns named in `layout`.
+    folder : str or pathlib.Path
+        Folder for the PNG files, named by :func:`node_file_key` (so :func:`match_files_to_nodes` finds them).
+    layout : list of list of str
+        Columns of `values` per grid row, e.g. ``[["4h IC50", "4h IC99"], ["24h IC50", "24h IC99"]]``.
+    marks : pandas.DataFrame, optional
+        Booleans with the same index and columns: cells to mark with a star.
+    vmin, vmax : float
+        Colour scale limits (default -4, 4), centred at 0.
+    colors : tuple of 3 colours
+        Low, centre and high colours.
+    missing_color : str
+        Colour of missing values.
+    overwrite : bool
+        Redraw existing files (default False: keep them).
+
+    Returns
+    -------
+    dict
+        Node -> image path, for every node of `values`.
+
+    Examples
+    --------
+    >>> import pandas as pd
+    >>> lfc = pd.DataFrame({"4h": [1.5, -2.0], "24h": [0.2, None]}, index=["AT1G01010", "AT1G01020"])
+    >>> images = heatmap_images(lfc, "heatmaps", [["4h"], ["24h"]], marks=lfc.abs() >= 1)  # doctest: +SKIP
+    '''
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    import numpy as np
+    import pandas as pd
+    from matplotlib.colors import LinearSegmentedColormap, TwoSlopeNorm
+
+    cmap = LinearSegmentedColormap.from_list("diverging", list(colors)).with_extremes(bad=missing_color)
+    norm = TwoSlopeNorm(vmin=vmin, vcenter=0, vmax=vmax)
+    folder = Path(folder)
+    folder.mkdir(parents=True, exist_ok=True)
+    n_rows, n_cols = len(layout), max(len(r) for r in layout)
+    images, drawn = {}, 0
+    for node in values.index:
+        path = folder / f"{node_file_key(node)}.png"
+        images[node] = path
+        if path.exists() and not overwrite:
+            continue
+        m = np.full((n_rows, n_cols), np.nan)
+        star = np.zeros((n_rows, n_cols), bool)
+        for i, row in enumerate(layout):
+            for j, col in enumerate(row):
+                v = values.at[node, col]
+                m[i, j] = float(v) if pd.notna(v) else np.nan
+                if marks is not None and node in marks.index:
+                    star[i, j] = bool(marks.at[node, col]) and not np.isnan(m[i, j])
+        fig, ax = plt.subplots(figsize=(n_cols, n_rows))
+        ax.pcolormesh(np.ma.masked_invalid(m), cmap=cmap, norm=norm, edgecolors="black", linewidth=4)
+        for r, c in zip(*np.nonzero(star)):
+            ax.plot(c + 0.5, r + 0.5, marker=(6, 2, 0), markersize=16, markeredgecolor="black", markeredgewidth=2)
+        ax.invert_yaxis()
+        ax.set_aspect("equal")
+        ax.axis("off")
+        fig.savefig(path, transparent=True, bbox_inches="tight", pad_inches=0)
+        plt.close(fig)
+        drawn += 1
+    logger.info("%d heatmap images drawn, %d kept, in %s", drawn, len(images) - drawn, folder)
+    return images
+
+
 def unique_image_copies(images, folder, to_png=False):
     '''Copy images to new, unique file names, optionally converting SVG to PNG.
 

@@ -134,3 +134,55 @@ def mercator_gene_sets(path, levels=None, min_size=1, max_size=None, exclude_bin
 
     return {f"{code}_{names.get(code, '')}": sorted(genes[code])
             for code in sorted(genes, key=order) if keep(code, genes[code])}
+
+
+# PlantGSEA (http://structuralbiology.cau.edu.cn/PlantGSEA/) "DetailInfo" download: tab-separated, no header
+_PLANTGSEA_COLUMNS = {0: "set", 1: "source", 3: "reference", 8: "description", 10: "genes"}
+_AGI = re.compile(r"^AT[1-5CM]G\d{5}$")
+
+
+def read_plantgsea(path):
+    '''The gene sets of a PlantGSEA download, as a table.
+
+    Parameters
+    ----------
+    path : str or pathlib.Path
+        PlantGSEA "DetailInfo" file (e.g. ``Ara.DetailInfo_<date>.txt``): tab-separated, no header; column 1 the
+        set name, 2 the source (e.g. ``GO_BP``, ``Literature``, ``KEGG``), 4 the reference (PubMed id),
+        9 the description and 11 the comma-separated genes. Latin-1 encoded; optionally gzipped (``.gz``).
+
+    Returns
+    -------
+    pandas.DataFrame
+        ``set``, ``source``, ``reference``, ``description``, ``genes`` (list of Arabidopsis gene ids; other
+        identifiers in the file are left out).
+    '''
+    import pandas as pd
+    df = pd.read_csv(path, sep="\t", header=None, dtype=str, encoding="latin-1",
+                     usecols=list(_PLANTGSEA_COLUMNS)).rename(columns=_PLANTGSEA_COLUMNS)
+    df["genes"] = [[g for g in str(x).split(",") if _AGI.match(g)] for x in df.genes]
+    return df[list(_PLANTGSEA_COLUMNS.values())].drop_duplicates("set").reset_index(drop=True)
+
+
+def plantgsea_gene_sets(path, sources=None, min_size=1, max_size=None):
+    '''PlantGSEA gene sets, e.g. for an enrichment analysis.
+
+    Parameters
+    ----------
+    path : str or pathlib.Path
+        PlantGSEA "DetailInfo" file, see :func:`read_plantgsea`.
+    sources : str or list of str, optional
+        Keep only sets of these sources (e.g. ``["GO_BP", "Literature"]``). Default: all.
+    min_size, max_size : int, optional
+        Keep sets with at least `min_size` (default 1) and at most `max_size` genes.
+
+    Returns
+    -------
+    dict
+        Set name -> sorted list of gene ids.
+    '''
+    df = read_plantgsea(path)
+    if sources is not None:
+        df = df[df.source.isin(as_list(sources))]
+    return {r.set: sorted(set(r.genes)) for r in df.itertuples()
+            if len(set(r.genes)) >= min_size and (max_size is None or len(set(r.genes)) <= max_size)}

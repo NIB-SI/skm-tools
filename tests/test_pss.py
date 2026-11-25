@@ -912,3 +912,40 @@ def test_simplify_pss_merge_rule():
 def test_simplify_pss_rejects_simple_graph():
     with pytest.raises(ValueError, match="already simplified"):
         simplify_pss(simplify_pss(_conflicting_edges()))
+
+
+class TestMetabolismAndPathways:
+    def test_metabolite_enzymes(self, pss_gene_network_ath_edge_path, pss_gene_network_ath_node_path):
+        from skm_tools.pss import metabolite_enzymes, pss_gene_network_to_networkx
+        g = pss_gene_network_to_networkx(pss_gene_network_ath_edge_path, pss_gene_network_ath_node_path)
+        m = metabolite_enzymes(g)
+        assert list(m.columns) == ["enzyme", "metabolite", "role", "reaction_id", "metabolite_type"]
+        assert len(m) and set(m.role) <= {"producer", "consumer"}
+        for r in m.itertuples():
+            edges = g.get_edge_data(r.enzyme, r.metabolite).values()
+            assert any(d["reaction_type"] == "catalysis" and d["source_role"] == "catalyst"
+                       and d["target_role"] == {"producer": "product", "consumer": "substrate"}[r.role]
+                       for d in edges)
+
+    def test_metabolite_enzymes_toy(self):
+        from skm_tools.pss import metabolite_enzymes
+        g = nx.MultiDiGraph()
+        g.add_node("E", node_type="PlantCoding", species="ath")
+        g.add_node("S", node_type="Metabolite")
+        g.add_node("P", node_type="Metabolite")
+        cat = dict(reaction_type="catalysis", source_role="catalyst", reaction_id="rx1")
+        g.add_edge("E", "P", target_role="product", **cat)
+        g.add_edge("E", "S", target_role="substrate", **cat)
+        g.add_edge("S", "P", reaction_type="catalysis", source_role="substrate", target_role="product",
+                   reaction_id="rx1")
+        assert sorted(map(tuple, metabolite_enzymes(g)[["enzyme", "metabolite", "role"]].values)) == [
+            ("E", "P", "producer"), ("E", "S", "consumer")]
+
+    def test_pathway_gene_sets(self):
+        from skm_tools.pss import pathway_gene_sets
+        g = nx.MultiDiGraph()
+        g.add_node("G1", species="ath", all_pathways=["JA", "ET"])
+        g.add_node("G2", species="ath", all_pathways=["JA"])
+        g.add_node("OPDA", all_pathways=["JA"])
+        assert pathway_gene_sets(g) == {"ET": ["G1"], "JA": ["G1", "G2"]}
+        assert pathway_gene_sets(g, genes_only=False)["JA"] == ["G1", "G2", "OPDA"]

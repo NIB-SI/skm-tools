@@ -594,3 +594,49 @@ def test_show_node_images_corner_position(p4c):
     defaults = [c.args[0] for c in p4c.style_defaults.set_visual_property_default.call_args_list]
     assert {"visualProperty": "NODE_CUSTOMGRAPHICS_POSITION_2", "value": "NE,C,c,0.00,0.00"} in defaults
     assert {"visualProperty": "NODE_CUSTOMGRAPHICS_SIZE_2", "value": 24} in defaults
+
+
+def test_flag_column():
+    g = nx.Graph()
+    g.add_node("A", node_type="PlantCoding")
+    g.add_node("B", node_type="Metabolite")
+    g.add_node("C")
+    cu.flag_column(g, "border_flag", {"A": "robust DEG", "X": "ignored"})
+    assert dict(g.nodes(data="border_flag")) == {"A": "robust DEG", "B": "Metabolite", "C": ""}
+    cu.flag_column(g, "f", {}, fallback=None)
+    assert set(dict(g.nodes(data="f")).values()) == {""}
+
+
+def test_extend_discrete_mapping(p4c):
+    p4c.get_style_mapping.return_value = {"mappingType": "discrete", "mappingColumn": "node_type",
+                                          "map": [{"key": "PlantCoding", "value": "ELLIPSE"},
+                                                  {"key": "Metabolite", "value": "ROUND_RECTANGLE"}]}
+    entries = cu.extend_discrete_mapping("S2", "NODE_SHAPE", "shape_key", {"TF": "DIAMOND"}, base_style="SKM",
+                                         network=5)
+    assert entries == {"PlantCoding": "ELLIPSE", "Metabolite": "ROUND_RECTANGLE", "TF": "DIAMOND"}
+    p4c.get_style_mapping.assert_called_once_with("SKM", "NODE_SHAPE")
+    p4c.map_visual_property.assert_called_once_with("NODE_SHAPE", "shape_key", "d",
+                                                    ["PlantCoding", "Metabolite", "TF"],
+                                                    ["ELLIPSE", "ROUND_RECTANGLE", "DIAMOND"], network=5)
+    p4c.update_style_mapping.assert_called_once_with("S2", p4c.map_visual_property.return_value)
+
+
+def test_extend_discrete_mapping_without_existing_mapping(p4c):
+    p4c.get_style_mapping.side_effect = Exception("no mapping")
+    assert cu.extend_discrete_mapping("S2", "NODE_BORDER_WIDTH", "border_flag", {"TF": 10}) == {"TF": 10}
+
+
+def test_load_network_significant_digits(p4c):
+    g = nx.DiGraph()
+    g.add_edge("A", "B", weight=0.123456)
+    g.nodes["A"].update(padj=0.000123456, fold=13.4651, n=12345, name_like="x")
+    p4c.networks.create_network_from_data_frames.return_value = 1
+    p4c.tables.get_table_column_types.return_value = {"name": "String"}
+    p4c.edge_name_to_edge_suid.return_value = [11]
+    cu.load_network(g, "net", significant_digits=3)
+    (_,), node_kw = p4c.commands.cyrest_put.call_args_list[0]
+    (_,), edge_kw = p4c.commands.cyrest_put.call_args_list[1]
+    a = node_kw["body"]["data"][0]
+    assert (a["padj"], a["fold"], a["n"]) == (0.000123, 13.5, 12345)
+    assert edge_kw["body"]["data"][0]["weight"] == 0.123
+    assert g.nodes["A"]["fold"] == 13.4651                 # the graph is unchanged
