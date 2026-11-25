@@ -74,6 +74,20 @@ species filter.
 
    reasons = filter_ckn_nodes(ckn, node_types=["PlantCoding", "Metabolite"], tissues=["leaf"])
 
+Transcription factors
+=====================
+
+:func:`~skm_tools.ckn.transcription_factors` returns the sources of the transcription factor
+regulation edges in the network, and optionally the nodes of MapMan bins (e.g. ``"14.5"``,
+DNA-binding transcriptional regulation in MapMan4) for TFs without such edges. Only the edges
+in the graph count, so filter the ranks first if needed.
+
+.. code-block:: python
+
+   from skm_tools.ckn import transcription_factors
+
+   tfs = transcription_factors(ckn, mapman_bins="14.5")
+
 MapMan annotations
 ==================
 

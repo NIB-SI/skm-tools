@@ -6,6 +6,7 @@ from pathlib import Path
 
 import networkx as nx
 
+from .annotations import get_nodes_by_mapman
 from .skm_download_urls import CKN_EDGE_FILE, CKN_EDGE_URL, CKN_NODE_FILE, CKN_NODE_URL
 from .utils import as_list, download_if_missing, read_skm_table, remove_isolate_nodes
 
@@ -117,6 +118,38 @@ def rank_counts(g):
     '''
     counts = Counter(d["rank"] for *_, d in g.edges(data=True) if d.get("rank") is not None)
     return {r: counts[r] for r in sorted(set(CKN_RANKS) | set(counts))}
+
+
+TF_REGULATION = "transcription factor regulation"
+'''The CKN edge ``type`` of a transcription factor regulating a gene.'''
+
+
+def transcription_factors(g, mapman_bins=None):
+    '''Transcription factors in CKN.
+
+    The sources of the network's transcription factor regulation edges (``type`` ``"transcription factor
+    regulation"``), and optionally the nodes annotated with MapMan bins, e.g. ``"14.5"`` (RNA
+    biosynthesis.DNA-binding transcriptional regulation in MapMan4), for TFs without regulation edges in CKN.
+    Only the edges in `g` count: filter the edges first (:func:`filter_ckn_edges`) to restrict to some ranks.
+
+    Parameters
+    ----------
+    g : networkx.Graph
+        CKN, e.g. from :func:`ckn_to_networkx`.
+    mapman_bins : str or list of str, optional
+        MapMan bins whose nodes (and those of their sub-bins) also count as TFs; see
+        :func:`skm_tools.annotations.get_nodes_by_mapman`.
+
+    Returns
+    -------
+    set
+    '''
+    tfs = {u for u, _, d in g.edges(data=True) if d.get("type") == TF_REGULATION}
+    n_edges = len(tfs)
+    if mapman_bins is not None:
+        tfs |= set(get_nodes_by_mapman(g, mapman_bins))
+    logger.info("%d transcription factors (%d with TF regulation edges)", len(tfs), n_edges)
+    return tfs
 
 
 def filter_ckn_edges(g,

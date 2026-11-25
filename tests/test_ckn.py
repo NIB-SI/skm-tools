@@ -255,3 +255,24 @@ def test_filter_ckn_nodes_complex_component_removed():
     reasons = filter_ckn_nodes(g, node_types=["PlantCoding", "Complex"])
     assert reasons == {"B": "wrong node type", "A|B": "complex component removed",
                        "A": "isolate", "C": "isolate"}
+
+
+class TestTranscriptionFactors:
+    def test_sources_of_tf_regulation_edges(self):
+        from skm_tools.ckn import TF_REGULATION, transcription_factors
+        g = nx.DiGraph()
+        g.add_edge("TF1", "G1", type=TF_REGULATION)
+        g.add_edge("TF1", "G2", type=TF_REGULATION)
+        g.add_edge("K1", "TF1", type="post-translational modification")
+        g.add_node("TF2", mapman=["14.5.7.1_RNA biosynthesis.DNA-binding transcriptional regulation.NAC"])
+        g.add_node("G3", mapman=["14.50_something else"])
+        assert transcription_factors(g) == {"TF1"}
+        assert transcription_factors(g, mapman_bins="14.5") == {"TF1", "TF2"}
+
+    def test_fixture(self, ckn_edge_path, ckn_node_path):
+        from skm_tools.ckn import transcription_factors
+        g = ckn_to_networkx(ckn_edge_path, ckn_node_path)
+        tfs = transcription_factors(g)
+        assert "AT2G43010" in tfs
+        assert all(any(d["type"] == "transcription factor regulation" for *_, d in g.out_edges(t, data=True))
+                   for t in tfs)

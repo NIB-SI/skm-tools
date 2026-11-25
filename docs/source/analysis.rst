@@ -42,6 +42,32 @@ attribute (named by ``distance_attr``).
 With ``induced=False`` only the edges followed outwards are kept, not every edge between
 the nodes found.
 
+Connectivity of a gene set
+==========================
+
+:func:`~skm_tools.connectivity.induced_connectivity` asks whether some nodes (e.g. the
+differentially expressed genes) are more connected among themselves than random nodes: the
+number of edges between them and the size of their largest connected component, against
+random node sets of the same size and degree distribution drawn from a universe (e.g. the
+genes measured). The graph is treated as undirected, and each node pair counts once (edge
+directions and parallel edges don't add up). The p-values are empirical: (number of random
+sets at least as high + 1) / (``n_random`` + 1).
+
+.. code-block:: python
+
+   import networkx as nx
+   from skm_tools.ckn import filter_ckn_edges
+   from skm_tools.connectivity import induced_connectivity
+
+   filter_ckn_edges(ckn, keep_edge_ranks=[0, 1, 2])
+   g = nx.Graph(ckn)                  # or the CKN graph itself
+   r = induced_connectivity(g, degs, universe=measured_genes, n_random=500, seed=7)
+   r["edges"], r["edges_fold"], r["edges_p"], r["lcc"], r["lcc_p"]
+
+The universe matters: random genes should come from the genes that could have been DE (e.g.
+those expressed). Genes of the universe without edges count too (degree 0), if they are
+nodes of the graph.
+
 Experimental data
 =================
 
