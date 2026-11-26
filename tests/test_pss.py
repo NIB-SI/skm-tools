@@ -959,3 +959,23 @@ class TestMetabolismAndPathways:
         g.add_node("OPDA", all_pathways=["JA"])
         assert pathway_gene_sets(g) == {"ET": ["G1"], "JA": ["G1", "G2"]}
         assert pathway_gene_sets(g, genes_only=False)["JA"] == ["G1", "G2", "OPDA"]
+
+
+def test_filter_pss_nodes_species_without_homologues_raises():
+    g = nx.MultiDiGraph(pss_network="interaction_network")
+    g.add_node("K[fc1]", node_type="PlantCoding", functional_cluster_id="fc1", ath_homologues=["AT1G01010"])
+    g.add_node("M", node_type="Metabolite", ath_homologues=None)
+    g.add_edge("K[fc1]", "M", "rx1", reaction_id="rx1")
+    with pytest.raises(ValueError, match="stu"):
+        filter_pss_nodes(g, species=["ath", "stu"])
+    assert g.number_of_nodes() == 2          # unchanged
+
+
+def test_filter_pss_nodes_species_on_single_species_export_raises():
+    # an export for one species has "genes", no <species>_homologues
+    g = nx.MultiDiGraph(pss_network="interaction_network")
+    g.add_node("K[fc1]", node_type="PlantCoding", functional_cluster_id="fc1", genes=["AT1G01010"])
+    g.add_node("M", node_type="Metabolite", genes=None)
+    g.add_edge("K[fc1]", "M", "rx1", reaction_id="rx1")
+    with pytest.raises(ValueError, match="genes"):
+        filter_pss_nodes(g, species="ath")

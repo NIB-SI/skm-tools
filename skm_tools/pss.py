@@ -421,7 +421,9 @@ def filter_pss_nodes(g, node_types=None, species=None, remove_isolates=True):
     Raises
     ------
     ValueError
-        If `node_types` is given for the reaction graph, or `species` for a gene network.
+        If `node_types` is given for the reaction graph, `species` for a gene network, or a
+        species without a ``<species>_homologues`` attribute in `g` (e.g. a misspelt code,
+        or an export for some species only, which has ``genes`` instead).
     '''
     node_types = as_list(node_types)
     species = as_list(species)
@@ -433,6 +435,14 @@ def filter_pss_nodes(g, node_types=None, species=None, remove_isolates=True):
         raise ValueError("species filtering is for the interaction network; a gene network "
                          "is already for one species (load the gene network of the species "
                          "instead).")
+    if species:
+        attributes = set().union(*(data.keys() for _, data in g.nodes(data=True)))
+        unknown = [sp for sp in species if f"{sp}_homologues" not in attributes]
+        if unknown:
+            hint = (" (the network has a 'genes' attribute instead: it was exported for one "
+                    "species or several, not with all species)" if "genes" in attributes else "")
+            raise ValueError(f"filter_pss_nodes(species=...): no <species>_homologues attribute "
+                             f"for {', '.join(unknown)} in the network{hint}.")
     og_size = g.number_of_nodes()
 
     to_remove = set()
