@@ -58,7 +58,9 @@ PSS
 ===
 
 The genes of PSS functional clusters are listed per species in the ``<species>_homologues``
-node attributes, and each species has its own gene network: see :doc:`pss`.
+node attributes, and each species has its own gene network: see :doc:`pss`. PSS has two
+species without translation files: ``osa`` (*Oryza sativa*, rice) and ``nta``
+(*Nicotiana tabacum*, tobacco).
 
 CKN
 ===

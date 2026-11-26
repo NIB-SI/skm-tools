@@ -107,7 +107,9 @@ and filtered alike.
 
 **Reaction graph:** edges are keyed by ``role`` (e.g. ``substrate``, ``catalyst``,
 ``product``), as an entity can take part in the same reaction twice (e.g. as template and
-stimulator).
+stimulator). They have the participant's ``form``, ``location`` and ``organ`` (each place with
+a ``…_putative`` flag), and ``identifiers``, the participant's own genes where curated (a
+list, e.g. ``AT3G03990`` of a functional cluster).
 
 Filtering
 =========

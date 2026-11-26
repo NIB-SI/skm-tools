@@ -4,7 +4,7 @@ The default file names are the names the browser gives the downloads, without th
 that change between exports (the export date of PSS, the version of the translations).
 '''
 
-# CKN v2.1 (on the dev server; not yet on production as of 2026-10-20)
+# CKN v2.1, the default CKN of the web app (not on production until its next deploy, as of 2026-11-26)
 CKN_VERSION = 'v2.1-2026.10'
 CKN_EDGE_URL = f'https://skm.nib.si/downloads/ckn/{CKN_VERSION}/edges'
 CKN_NODE_URL = f'https://skm.nib.si/downloads/ckn/{CKN_VERSION}/nodes'
@@ -13,7 +13,7 @@ CKN_NODE_FILE = f'AtCKN-{CKN_VERSION}_node-annot.tsv.gz'
 
 # PSS network exports (pss-export), public, live version: /pss/<access>/<release>/<format>/<file>,
 # gene networks /pss/<access>/<release>/gene-network/<species>/<file>
-# (not on skm.nib.si until the web app with the new exports goes live)
+# (not on skm.nib.si until the web app's next deploy, as of 2026-11-26; old PSS download URLs then redirect)
 _PSS = 'https://skm.nib.si/downloads/pss/public/live'
 PSS_REACTION_GRAPH_EDGE_URL = f'{_PSS}/reaction-graph/edges'
 PSS_REACTION_GRAPH_NODE_URL = f'{_PSS}/reaction-graph/nodes'
