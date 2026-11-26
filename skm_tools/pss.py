@@ -60,6 +60,7 @@ _PSS_LIST_COLUMNS = {
     "components",
     "component_cluster_ids",
     "genes",
+    "identifiers",
 }
 # Gene network only: a gene in several functional clusters has one entry per cluster
 # (in the same order) in each of these. Loaded as lists for every node, so the type
@@ -75,6 +76,7 @@ _PSS_INT_COLUMNS = {
 _PSS_BOOL_COLUMNS = {
     "directed",
     "location_putative",
+    "organ_putative",
     "source_location_putative",
     "target_location_putative",
 }

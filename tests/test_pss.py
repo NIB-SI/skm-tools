@@ -202,6 +202,16 @@ class TestPSSReactionGraph:
         g = pss_reaction_graph_to_networkx(pss_reaction_graph_edge_path, pss_reaction_graph_node_path)
         assert set(g["WRKY33[fc00166]"]["rx00160"]) == {"template", "stimulator"}
 
+    def test_participant_columns(self, pss_reaction_graph_edge_path, pss_reaction_graph_node_path):
+        # organ and its putative flag, the participant's own genes (identifiers, a list)
+        g = pss_reaction_graph_to_networkx(pss_reaction_graph_edge_path, pss_reaction_graph_node_path)
+        edges = [d for _, _, d in g.edges(data=True)]
+        assert all(isinstance(d["location_putative"], bool) for d in edges)
+        assert all(isinstance(d["organ_putative"], bool) for d in edges)
+        assert any(d["organ"] for d in edges)
+        assert all(d["identifiers"] is None or isinstance(d["identifiers"], list) for d in edges)
+        assert any(d["identifiers"] and len(d["identifiers"]) > 1 for d in edges)
+
 
 class TestPSSInteractionNetwork:
 
