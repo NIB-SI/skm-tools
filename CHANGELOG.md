@@ -5,6 +5,11 @@ Versions are tagged `v<version>`. The `publication` branch is skm-tools as used 
 
 ## Unreleased
 
+- `skm_tools.augment_pss` (by Vid Modic, @Vid-dot): augment the PSS gene network with the CKN
+  interactions around its genes (`build_augmented_pss`), list the PSS gene pairs CKN newly
+  connects, directly or through one CKN node (`find_new_direct_edges`,
+  `find_new_intermediate_pairs`), and inspect them (`extract_pair_subnetwork`,
+  `extract_node_neighbourhood`, `show_augmented` for Cytoscape). A tutorial, after Vid's notebook.
 - `simplify_pss` keeps the attributes of merged edges per reaction: lists aligned with
   `reaction_id` (`reaction_type`, roles, `evidence_sentence`, `influence_sbo`, ...), on every
   edge of the result. `interaction`, `directed` and `rank` keep one value. Before, merged edges
