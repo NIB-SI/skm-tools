@@ -259,23 +259,79 @@ def _node_reactions(g, n, reaction_graph):
     return {r for _, _, d in edges for r in _reaction_ids(d)}
 
 
-def _merge_edge_data(edges, differing=None, log_level=logging.DEBUG):
-    '''Merge the attribute dicts of edges into one: all their reaction ids (a sorted list), and
-    for every other attribute the value of :func:`skm_tools.utils.merge_values`, applied in
-    reaction id order. Counts the attributes whose values differed in `differing`, and logs
-    them at `log_level`.'''
-    edges = sorted(edges, key=lambda d: _reaction_ids(d))
-    reaction_ids = sorted({r for d in edges for r in _reaction_ids(d)})
-    data = {}
-    for k in sorted(set().union(*(d.keys() for d in edges)) - {"reaction_id"}):
-        value, differ = merge_values(k, [d.get(k) for d in edges])
-        data[k] = value
+# edge attributes with one value per merged edge (skm_tools.utils.merge_values); the others (but
+# reaction_id) are per reaction, as lists aligned with reaction_id
+_SUMMARY_ATTRS = ("interaction", "directed", "rank")
+
+
+def _reaction_key(r):
+    '''Sort key of reaction ids (None, for edges without one, first).'''
+    return (r is not None, str(r))
+
+
+def _per_reaction(edge_data):
+    '''The reactions of an edge: reaction id -> its per-reaction attributes (all but
+    ``reaction_id`` and the summary attributes). In a merged edge (a list ``reaction_id``) the
+    attributes are lists aligned with ``reaction_id``; otherwise each reaction gets the values
+    as they are. An edge without reaction ids is one reaction, None.'''
+    ids = _reaction_ids(edge_data) or [None]
+    aligned = isinstance(edge_data.get("reaction_id"), (list, tuple))
+    keys = [k for k in edge_data if k != "reaction_id" and k not in _SUMMARY_ATTRS]
+    reactions = {}
+    for i, r in enumerate(ids):
+        reactions.setdefault(r, {
+            k: (v[i] if aligned and isinstance(v, (list, tuple)) and len(v) == len(ids) else v)
+            for k, v in ((k, edge_data[k]) for k in keys)})
+    return reactions
+
+
+def _edge_data(reactions, summary):
+    '''Edge attributes from per-reaction attributes (reaction id -> attributes) and the summary
+    attributes: ``reaction_id`` a sorted list, the per-reaction attributes lists aligned with it.'''
+    ids = sorted(reactions, key=_reaction_key)
+    keys = sorted(set().union(*reactions.values())) if reactions else []
+    data = dict(summary)
+    data.update({k: [reactions[r].get(k) for r in ids] for k in keys})
+    data["reaction_id"] = ids
+    return data
+
+
+def _edge_subset(edge_data, reaction_ids):
+    '''The edge restricted to `reaction_ids` (a merged edge, or the edge itself if it has no
+    others), or None if it has none of them. The summary attributes are kept as they are.'''
+    reactions = _per_reaction(edge_data)
+    keep = {r: a for r, a in reactions.items() if r in reaction_ids}
+    if not keep:
+        return None
+    if len(keep) == len(reactions):
+        return edge_data
+    return _edge_data(keep, {k: edge_data[k] for k in _SUMMARY_ATTRS if k in edge_data})
+
+
+def _merge_edge_data(edges, differing=None, log_level=logging.DEBUG, single=()):
+    '''Merge the attribute dicts of edges into one: all their reaction ids (a sorted list), with
+    the per-reaction attributes as lists aligned with them (a reaction in several of the edges:
+    from the first), and the summary attributes (``interaction``, ``directed``, ``rank``) by
+    :func:`skm_tools.utils.merge_values`. Counts the summary attributes whose values differed in
+    `differing`, and logs them at `log_level`. The attributes in `single` (equal in all the
+    edges) keep their one value.'''
+    reactions = {}
+    for d in edges:
+        for r, attrs in _per_reaction(d).items():
+            reactions.setdefault(r, attrs)
+    summary = {}
+    for k in _SUMMARY_ATTRS:
+        values = [d.get(k) for d in edges if k in d]
+        if not values:
+            continue
+        summary[k], differ = merge_values(k, values)
         if differ:
             if differing is not None:
                 differing[k] += 1
-            logger.log(log_level, "%s --> %s: values %s, keeping %s", reaction_ids, k,
-                         [d.get(k) for d in edges], value)
-    data["reaction_id"] = reaction_ids
+            logger.log(log_level, "%s --> %s: values %s, keeping %s",
+                       sorted(reactions, key=_reaction_key), k, values, summary[k])
+    data = _edge_data(reactions, summary)
+    data.update({k: edges[0][k] for k in single if k in edges[0]})
     return data
 
 
@@ -327,9 +383,10 @@ def remove_reactions(g, reaction_ids, remove_isolates=True):
             ids = _reaction_ids(d)
             if not reaction_ids.intersection(ids):
                 continue
-            kept = [r for r in ids if r not in reaction_ids]
-            if kept:
-                d["reaction_id"] = kept
+            kept = _edge_subset(d, set(_reaction_ids(d)) - reaction_ids)
+            if kept is not None:
+                d.clear()
+                d.update(kept)
             else:
                 to_remove.append(tuple(e))
         g.remove_edges_from(to_remove)
@@ -517,16 +574,23 @@ def simplify_pss(g, split_on_attrs=None, verbose=False):
     Returns a new graph; `g` is unchanged. For the interaction network or a gene network,
     not the reaction graph (raises ValueError).
 
-    Merged edges get all ``reaction_id`` values, as a sorted list (edges that aren't merged get
-    a list too, so the attribute has one type). For every other attribute one value is kept,
-    by this rule (:func:`skm_tools.utils.merge_values`), ignoring missing values (None):
+    Each edge gets the ``reaction_id`` values of the edges merged into it, as a sorted list,
+    and their other attributes per reaction: lists aligned with ``reaction_id`` (e.g.
+    ``reaction_type``, ``source_role``, ``evidence_sentence``, ``influence_sbo``). Edges that
+    aren't merged get lists too, so each attribute has one type. Three attributes are
+    summarised in one value instead (:func:`skm_tools.utils.merge_values`), ignoring missing
+    values (None):
 
     - all values equal: that value;
     - ``interaction``: ``"unknown-influence"`` if they differ (e.g. a positive and a negative
-      influence);
+      influence; ``influence_sbo`` has the influence of each reaction);
     - ``directed``: True if any edge is directed;
-    - ``rank``: the lowest;
-    - anything else: the value of the edge with the first reaction id.
+    - ``rank``: the lowest.
+
+    For example, the edge of reactions rx1 (catalysis) and rx2 (binding/oligomerisation):
+    ``reaction_id`` ``["rx1", "rx2"]``, ``reaction_type``
+    ``["catalysis", "binding/oligomerisation"]``. To compare an attribute with a value, compare
+    its elements: ``"catalysis" in d["reaction_type"]``.
 
     Parameters
     ----------
@@ -534,11 +598,12 @@ def simplify_pss(g, split_on_attrs=None, verbose=False):
         PSS interaction network or gene network.
     split_on_attrs : str or list of str, optional
         Edge attributes (e.g. ``["interaction"]``) that must not be merged away: parallel
-        edges are only merged with others that have the same values for all of them.
+        edges are only merged with others that have the same values for all of them. These
+        keep their one value (not a list).
     verbose : bool
-        Log every merged edge whose attributes differed, with the value kept (INFO; otherwise
-        DEBUG). A summary, with the number of merged edges per differing attribute, is always
-        logged (INFO).
+        Log every merged edge whose summary attributes differed, with the value kept (INFO;
+        otherwise DEBUG). A summary, with the number of merged edges per differing attribute,
+        is always logged (INFO).
 
     Returns
     -------
@@ -569,15 +634,12 @@ def simplify_pss(g, split_on_attrs=None, verbose=False):
         for d in g[source][target].values():
             groups.setdefault(tuple(d.get(a) for a in split_on_attrs), []).append(d)
         for group_edges in groups.values():
-            if len(group_edges) == 1:
-                data = {**group_edges[0], "reaction_id": _reaction_ids(group_edges[0])}
-            else:
-                data = _merge_edge_data(group_edges, differing, log_level)
-            new_g.add_edge(source, target, **data)
+            new_g.add_edge(source, target, **_merge_edge_data(group_edges, differing, log_level,
+                                                              single=split_on_attrs))
 
     if differing:
-        logger.info("Merged edges with differing values: %s. See the docstring for the value "
-                    "kept, and verbose=True for details.",
+        logger.info("Merged edges with differing summary values: %s. See the docstring for the "
+                    "value kept, and verbose=True for details.",
                     ", ".join(f"{k} ({n})" for k, n in differing.most_common()))
 
     return new_g
@@ -592,34 +654,37 @@ _COMPOSED_INTERACTION = {
 }
 
 
-def _propagates(e):
-    '''Whether rewiring may go through edge `e`: not through the mutual edges between binding
-    partners (partner <-> partner), only the complex-forming ones (partner -> complex).'''
-    return not (e.get("reaction_type") == "binding/oligomerisation"
-                and e.get("target_role") != "product")
+def _propagating(e):
+    '''Edge `e` with the reactions rewiring may go through (None if none): not the mutual edges
+    between binding partners (partner <-> partner), only the complex-forming ones
+    (partner -> complex).'''
+    return _edge_subset(e, {r for r, a in _per_reaction(e).items()
+                            if not (a.get("reaction_type") == "binding/oligomerisation"
+                                    and a.get("target_role") != "product")})
 
 
-def _catalysis_edge(e, source_role, target_role):
-    '''Whether `e` is a catalysis edge of a reaction (not a rewired one: those take their roles from
-    the edges they replace) from `source_role` to `target_role`.'''
-    return (e.get("reaction_type") == "catalysis" and not str(e.get("note") or "").startswith("rewired")
-            and e.get("source_role") == source_role and e.get("target_role") == target_role)
+def _catalysis_reactions(e, source_role, target_role):
+    '''The reactions of `e` in which it is a catalysis edge from `source_role` to `target_role`
+    (none for the reactions of a rewired edge, in which its source or its target takes no part).'''
+    return {r for r, a in _per_reaction(e).items()
+            if a.get("reaction_type") == "catalysis" and a.get("source_role") == source_role
+            and a.get("target_role") == target_role}
 
 
 def _consumes(e):
-    '''Whether `e` is a catalysis consumption edge, catalyst -| substrate (the enzyme uses up its
-    substrate): not rewired through as it is; see :func:`_feeds`.'''
-    return _catalysis_edge(e, "catalyst", "substrate")
+    '''The reactions of `e` in which it is a catalysis consumption edge, catalyst -| substrate (the
+    enzyme uses up its substrate): not rewired through as it is; see :func:`_feeds`.'''
+    return _catalysis_reactions(e, "catalyst", "substrate")
 
 
 def _catalysis(e):
-    '''Whether `e` is a catalysis edge catalyst -> product.'''
-    return _catalysis_edge(e, "catalyst", "product")
+    '''The reactions of `e` in which it is a catalysis edge catalyst -> product.'''
+    return _catalysis_reactions(e, "catalyst", "product")
 
 
 def _conversion(e):
-    '''Whether `e` is a catalysis conversion edge, substrate -> product.'''
-    return _catalysis_edge(e, "substrate", "product")
+    '''The reactions of `e` in which it is a catalysis conversion edge, substrate -> product.'''
+    return _catalysis_reactions(e, "substrate", "product")
 
 
 def _feeds(e):
@@ -639,20 +704,28 @@ def _feeds(e):
 
 def _rewired_edge(up, down, node):
     '''The edge replacing up (A -> node) and down (node -> C).'''
-    data = {}
-    for k in set(up) | set(down):
-        if k.startswith("source_"):
-            data[k] = up.get(k)
-        elif k.startswith("target_"):
-            data[k] = down.get(k)
-        else:
-            data[k] = merge_values(k, [up.get(k), down.get(k)])[0]
-    data["reaction_id"] = sorted(set(_reaction_ids(up) + _reaction_ids(down)))
-    data["interaction"] = _COMPOSED_INTERACTION.get(
-        (up.get("interaction"), down.get("interaction")), "unknown-influence")
-    data["directed"] = True
-    data["note"] = f"rewired through {node}"
-    return data
+    up_reactions, down_reactions = _per_reaction(up), _per_reaction(down)
+    reactions = {}
+    for r in set(up_reactions) | set(down_reactions):
+        a_up, a_down = up_reactions.get(r, {}), down_reactions.get(r, {})
+        attrs = {}
+        for k in set(a_up) | set(a_down):
+            if k.startswith("source_"):   # A's, in the reactions of A -> node
+                attrs[k] = a_up.get(k)
+            elif k.startswith("target_"):  # C's, in the reactions of node -> C
+                attrs[k] = a_down.get(k)
+            else:
+                attrs[k] = (a_up if r in up_reactions else a_down).get(k)
+        attrs["note"] = f"rewired through {node}"
+        reactions[r] = attrs
+    summary = {
+        "interaction": _COMPOSED_INTERACTION.get(
+            (up.get("interaction"), down.get("interaction")), "unknown-influence"),
+        "directed": True,
+    }
+    if "rank" in up or "rank" in down:
+        summary["rank"] = merge_values("rank", [up.get("rank"), down.get("rank")])[0]
+    return _edge_data(reactions, summary)
 
 
 def remove_and_rewire(g, nodes, dry_run=False):
@@ -679,21 +752,22 @@ def remove_and_rewire(g, nodes, dry_run=False):
     A -> B and E2 catalysing B -> C give E1 -> E2 (through B; positive), without shortcuts
     past E2. A reaction without a catalyst
     keeps its substrate -> product route (E1 -> B, B -> C uncatalysed, C -> D by E3: E1 -> E3).
-    The edges are recognised by their ``reaction_type``, roles and reaction ids; after
-    :func:`simplify_pss`, an edge merged with another reaction's edge between the same two
-    nodes keeps the first reaction's ``reaction_type`` and roles, and may not be.
+    The edges are recognised by their ``reaction_type``, roles and reaction ids, per reaction:
+    each reaction of a merged edge (e.g. from :func:`simplify_pss`) is rewired as its own.
 
     A new edge A -> C, replacing A -> B -> C:
 
-    - ``reaction_id``: the reaction ids of both edges (a sorted list);
+    - ``reaction_id``: the reaction ids of both edges (a sorted list), and the other attributes
+      per reaction, as in :func:`simplify_pss`: ``source_*`` attributes from A -> B (None for
+      the reactions of B -> C only, in which A takes no part), ``target_*`` attributes from
+      B -> C (None for those of A -> B only), and the others from the edge of the reaction;
+    - ``note``: ``"rewired through B"`` (for each reaction);
     - ``interaction``: the sign of the chain (positive and negative: negative; two negatives:
       positive; anything with an unknown influence: unknown);
-    - ``directed``: True;
-    - ``source_*`` attributes from A -> B, ``target_*`` attributes from B -> C, and other
-      attributes as in :func:`simplify_pss` (:func:`skm_tools.utils.merge_values`);
-    - ``note``: ``"rewired through B"``.
+    - ``directed``: True; ``rank``: the lower.
 
-    If A -> C already exists, the new edge is merged into it, as in :func:`simplify_pss`.
+    If A -> C already exists, the new edge is merged into it, as in :func:`simplify_pss` (a
+    reaction of both keeps the attributes of the existing edge).
 
     Parameters
     ----------
@@ -737,31 +811,29 @@ def remove_and_rewire(g, nodes, dry_run=False):
         # up the node (catalyst -| node) is downstream of it (node -> catalyst)
         upstream, downstream = {}, {}
         catalysed = set()       # reactions with a catalyst using up the node
-        made = {r for u in h.predecessors(node) if _catalysis(h[u][node])   # by a catalyst
-                for r in _reaction_ids(h[u][node])}
+        made = {r for u in h.predecessors(node) for r in _catalysis(h[u][node])}  # by a catalyst
         for u in h.predecessors(node):
-            e = h[u][node]
-            if u == node or not _propagates(e):
+            e = _propagating(h[u][node]) if u != node else None
+            if e is None:
                 continue
-            if _consumes(e):
-                downstream[u] = _feeds(e)
-                catalysed.update(_reaction_ids(e))
-                continue
+            drop = _consumes(e)
+            if drop:
+                downstream[u] = _feeds(_edge_subset(e, drop))
+                catalysed.update(drop)
             # from a substrate also removed, of a catalysed reaction: it reaches the node through
             # the catalyst
-            ids = set(_reaction_ids(e))
-            if _conversion(e) and u in to_remove and ids and ids <= made:
-                continue
-            upstream[u] = e
+            if u in to_remove:
+                drop = drop | (_conversion(e) & made)
+            e = _edge_subset(e, set(_per_reaction(e)) - drop)
+            if e is not None:
+                upstream[u] = e
         for v in h.successors(node):
-            e = h[node][v]
-            if v == node or not _propagates(e):
-                continue
+            e = _propagating(h[node][v]) if v != node else None
             # the product of a catalysed reaction: reached through its catalyst
-            ids = set(_reaction_ids(e))
-            if _conversion(e) and ids and ids <= catalysed:
-                continue
-            downstream.setdefault(v, e)
+            if e is not None:
+                e = _edge_subset(e, set(_per_reaction(e)) - (_conversion(e) & catalysed))
+            if e is not None:
+                downstream.setdefault(v, e)
         new_edges = [(u, v, _rewired_edge(up, down, node))
                      for u, up in upstream.items() for v, down in downstream.items() if u != v]
 
@@ -786,8 +858,10 @@ def remove_duplicated_binding_edges(g):
     '''Keep one direction of each mutual binding edge, in place.
 
     Binding partners are linked in both directions (A -> B and B -> A, same reaction); this
-    removes one of the two (which one is arbitrary), e.g. for a less cluttered drawing.
-    Don't use it before directed path or neighbourhood analysis.
+    removes one of the two (which one is arbitrary), e.g. for a less cluttered drawing. A merged
+    edge (e.g. from :func:`simplify_pss`) is removed only if all its reactions are bindings
+    that the opposite edge has too. Don't use it before directed path or neighbourhood
+    analysis.
 
     Parameters
     ----------
@@ -815,11 +889,13 @@ def remove_duplicated_binding_edges(g):
     for node in g.nodes():
         for upstream_node in g.predecessors(node):
             for u_key, e in edge_items(upstream_node, node):
-                if e.get("reaction_type") != "binding/oligomerisation":
+                reactions = _per_reaction(e)
+                if any(a.get("reaction_type") != "binding/oligomerisation"
+                       for a in reactions.values()):
                     continue
-                # the same reaction in the other direction
+                # the same reactions in the other direction
                 for d_key, e2 in edge_items(node, upstream_node):
-                    if e2.get("reaction_id") != e.get("reaction_id"):
+                    if not set(reactions) <= set(_per_reaction(e2)):
                         continue
                     forward = (upstream_node, node, u_key) if is_multi else (upstream_node, node)
                     reverse = (node, upstream_node, d_key) if is_multi else (node, upstream_node)
@@ -841,12 +917,12 @@ def metabolite_enzymes(g):
     '''The enzymes of the reactions that produce and that consume each metabolite.
 
     From the catalysis reactions: a catalyst's edge to a reaction's product (``target_role`` ``"product"``) and
-    to its substrate (``"substrate"``). Use the network before :func:`simplify_pss`, which merges the edges of
-    different reactions.
+    to its substrate (``"substrate"``), for each reaction of an edge (also of merged edges, e.g. from
+    :func:`simplify_pss`).
 
     Parameters
     ----------
-    g : networkx.MultiDiGraph
+    g : networkx.MultiDiGraph or networkx.DiGraph
         PSS interaction network or gene network.
 
     Returns
@@ -859,11 +935,12 @@ def metabolite_enzymes(g):
     role = {"product": "producer", "substrate": "consumer"}
     rows = []
     for u, v, d in g.edges(data=True):
-        if (d.get("reaction_type") == "catalysis" and d.get("source_role") == "catalyst"
-                and d.get("target_role") in role
-                and g.nodes[v].get("node_type") in ("Metabolite", "MetaboliteFamily")):
-            for rx in as_list(d.get("reaction_id")) or [None]:
-                rows.append((u, v, role[d["target_role"]], rx, g.nodes[v]["node_type"]))
+        if g.nodes[v].get("node_type") not in ("Metabolite", "MetaboliteFamily"):
+            continue
+        for rx, a in _per_reaction(d).items():
+            if (a.get("reaction_type") == "catalysis" and a.get("source_role") == "catalyst"
+                    and a.get("target_role") in role):
+                rows.append((u, v, role[a["target_role"]], rx, g.nodes[v]["node_type"]))
     return (pd.DataFrame(rows, columns=["enzyme", "metabolite", "role", "reaction_id", "metabolite_type"])
             .drop_duplicates().reset_index(drop=True))
 

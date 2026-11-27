@@ -160,21 +160,35 @@ for the reaction graph.
 
 :func:`~skm_tools.pss.simplify_pss` merges the parallel edges (one per reaction) between two
 nodes into one edge, and returns a new :class:`networkx.DiGraph`. The merged edge keeps all
-``reaction_id`` values (a sorted list; every edge of the result has a list), and one value of
-every other attribute, by a fixed rule: ``interaction`` becomes ``unknown-influence`` if the
-merged edges disagree (e.g. a positive and a negative influence), ``directed`` is True if
-any edge is directed, ``rank`` the lowest, and anything else the value of the first
-reaction. How many merged edges had differing values is logged (``verbose=True`` lists
-them). To keep such edges apart, pass ``split_on_attrs=["interaction"]``; the result is then
-a :class:`networkx.MultiDiGraph`.
+``reaction_id`` values, as a sorted list, and the other attributes per reaction, as lists
+aligned with it (``reaction_type``, ``source_role``, ``evidence_sentence``,
+``influence_sbo``, ...). Every edge of the result has lists, also those of one reaction, so
+compare the elements: ``"catalysis" in d["reaction_type"]``. Three attributes are summarised
+in one value instead: ``interaction`` becomes ``unknown-influence`` if the merged edges
+disagree (e.g. a positive and a negative influence; ``influence_sbo`` keeps each reaction's),
+``directed`` is True if any edge is directed, and ``rank`` is the lowest. How many merged
+edges had differing summary values is logged (``verbose=True`` lists them). To keep such
+edges apart, pass ``split_on_attrs=["interaction"]`` (these attributes keep one value); the
+result is then a :class:`networkx.MultiDiGraph`.
+
+.. code-block:: python
+
+   simple = simplify_pss(pss)
+   d = simple["AAO[fc00006]"]["BA"]
+   d["reaction_id"]      # ['rx00538', 'rx01009']
+   d["target_role"]      # ['product', 'substrate']: BA is made in rx00538, used up in rx01009
+   d["interaction"]      # 'unknown-influence'
+
 
 :func:`~skm_tools.pss.remove_and_rewire` removes nodes while connecting each of their
 upstream nodes to each of their downstream nodes, e.g. to hide intermediate steps. It needs
 a simple :class:`networkx.DiGraph`, so run :func:`~skm_tools.pss.simplify_pss` first. The
 nodes are removed one at a time, so chains of removed nodes are bridged. A new edge A → C
 (replacing A → B → C) has the sign of the chain (e.g. an activation followed by an
-inhibition: ``negative-influence``) and the reaction ids of both edges; if A → C exists
-already, it is merged into it. Rewiring doesn't go through the mutual edges between binding
+inhibition: ``negative-influence``) and the reaction ids of both edges, with A's attributes
+(``source_*``) of the reactions of A → B and C's (``target_*``) of those of B → C; if A → C
+exists already, it is merged into it. Each reaction of a merged edge is rewired as its own
+(e.g. an enzyme that makes a metabolite in one reaction and uses it up in another). Rewiring doesn't go through the mutual edges between binding
 partners, only through complex formation (partner → complex). ``dry_run=True`` returns the
 edges that would be added, without changing the graph.
 
@@ -195,7 +209,7 @@ Metabolism and pathways
 :func:`~skm_tools.pss.metabolite_enzymes` lists, per metabolite, the enzymes of the reactions
 that produce it (catalyst → product) and that consume it (catalyst → substrate), e.g. to read
 expression changes of the enzymes as a change in the capacity to make a metabolite (not its
-flux). Use the network before :func:`~skm_tools.pss.simplify_pss`, which merges reactions.
+flux), before or after :func:`~skm_tools.pss.simplify_pss`.
 :func:`~skm_tools.pss.pathway_gene_sets` gives the PSS pathways as gene sets.
 
 .. code-block:: python

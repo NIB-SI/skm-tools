@@ -53,6 +53,15 @@ def test_edges_one_row_per_interaction():
     ]
 
 
+def test_merged_edge_reaction_types():
+    g = nx.DiGraph()
+    g.add_edge("A", "B", interaction="positive-influence",
+               reaction_type=["catalysis", "binding/oligomerisation", "catalysis", None])
+    g.add_edge("B", "C", interaction="negative-influence", reaction_type=[None])
+    _, edges = to_dinar(g)
+    assert edges.reactionType.tolist() == ["act_binding/oligomerisation/catalysis", "inh_influence"]
+
+
 def test_write_dinar(tmp_path):
     write_dinar(_graph(), tmp_path / "nodes.txt", tmp_path / "edges.txt")
     nodes = pd.read_csv(tmp_path / "nodes.txt", sep="\t", dtype=str, keep_default_na=False)

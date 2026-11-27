@@ -59,7 +59,7 @@ def _reaction_type(d):
     sign = {"positive-influence": "act", "negative-influence": "inh"}.get(d.get("interaction"), "unk")
     reaction_type = d.get("reaction_type")
     if isinstance(reaction_type, (list, tuple, set)):
-        reaction_type = "/".join(sorted(map(str, reaction_type)))
+        reaction_type = "/".join(sorted({str(t) for t in reaction_type if not _missing(t)})) or None
     return f"{sign}_{_text(reaction_type) if not _missing(reaction_type) else 'influence'}"
 
 

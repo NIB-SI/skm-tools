@@ -3,6 +3,21 @@
 Versions are tagged `v<version>`. The `publication` branch is skm-tools as used for the SKM publication
 (doi:10.1016/j.xplc.2024.100920).
 
+## Unreleased
+
+- `simplify_pss` keeps the attributes of merged edges per reaction: lists aligned with
+  `reaction_id` (`reaction_type`, roles, `evidence_sentence`, `influence_sbo`, ...), on every
+  edge of the result. `interaction`, `directed` and `rank` keep one value. Before, merged edges
+  kept the first reaction's value, so e.g. `influence_sbo` could contradict `interaction`
+  (#5). **Changed:** code comparing these attributes with a single value on a simplified
+  network needs to compare their elements (`"catalysis" in d["reaction_type"]`).
+- `remove_and_rewire`, `remove_reactions`, `remove_duplicated_binding_edges` and
+  `metabolite_enzymes` work per reaction on merged edges: e.g. an enzyme that makes a
+  metabolite in one reaction and uses it up in another is rewired as both.
+- DiNAR: the reaction types of a merged edge are listed once each.
+- `silence_py4cytoscape` keeps py4cytoscape's request log off the console, e.g. in notebooks
+  (#7).
+
 ## 0.2.0 (2026-11-27)
 
 A rewrite for the network exports of the SKM web app (skm.nib.si, from 2026-11-27): the PSS downloads made by

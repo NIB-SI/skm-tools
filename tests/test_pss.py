@@ -321,11 +321,11 @@ def test_simplify_pss_keeps_edges_separate_when_split_attr_differs():
 def test_simplify_pss_keeps_attributes_not_in_the_original_whitelist():
     g = _make_multigraph(["activation", "inhibition"])
     g["A"]["B"]["R0"]["custom_score"] = "high"
-    g["A"]["B"]["R1"]["custom_score"] = "high"
+    g["A"]["B"]["R1"]["custom_score"] = "low"
 
     new_g = simplify_pss(g)
 
-    assert new_g["A"]["B"]["custom_score"] == "high"
+    assert new_g["A"]["B"]["custom_score"] == ["high", "low"]
 
 
 def test_simplify_pss_merges_within_matching_split_groups():
@@ -378,6 +378,22 @@ def test_remove_duplicated_binding_edges_on_multidigraph_keeps_unrelated_paralle
     assert remaining_reaction_ids == {"R0", "R1"}
 
 
+def test_remove_duplicated_binding_edges_after_simplify():
+    g = nx.MultiDiGraph()
+    g.add_edge("A", "B", **_binding_edge("R0"))
+    g.add_edge("B", "A", **_binding_edge("R0"))
+    g.add_edge("A", "C", **_binding_edge("R1"))
+    g.add_edge("C", "A", **_binding_edge("R1"))
+    g.add_edge("C", "A", **_base_edge("R2", "activation"))  # also another reaction
+    h = simplify_pss(g)
+
+    removed = remove_duplicated_binding_edges(h)
+
+    # A -> C goes (its reaction is in C -> A), C -> A stays (it has another reaction)
+    assert len(removed) == 2 and ("A", "C") in removed
+    assert h["C"]["A"]["reaction_id"] == ["R1", "R2"]
+
+
 def test_simplify_pss_single_edge_with_non_integer_key():
     g = _make_multigraph(["activation"])
 
@@ -413,9 +429,10 @@ def test_remove_and_rewire_connects_upstream_to_downstream():
     assert data["reaction_id"] == ["R0", "R1"]
     assert data["interaction"] == "positive-influence"
     assert data["directed"] is True
-    assert data["note"] == "rewired through B"
-    # roles of the ends: the source's from A -> B, the target's from B -> C
-    assert (data["source_role"], data["target_role"]) == ("modifier", "product")
+    assert data["note"] == ["rewired through B", "rewired through B"]
+    # roles of the ends, per reaction: A's in R0 (A -> B), C's in R1 (B -> C)
+    assert data["source_role"] == ["modifier", None]
+    assert data["target_role"] == [None, "product"]
 
 
 def test_remove_and_rewire_does_not_propagate_mutual_binding():
@@ -450,7 +467,8 @@ def test_remove_and_rewire_merges_into_existing_edges():
     remove_and_rewire(g, ["B"])
 
     assert g["A"]["C"]["reaction_id"] == ["R0", "R1", "R5"]
-    assert g["A"]["C"]["custom"] == "kept"
+    assert g["A"]["C"]["custom"] == [None, None, "kept"]
+    assert g["A"]["C"]["note"] == ["rewired through B", "rewired through B", None]
 
 
 def test_remove_and_rewire_two_removed_nodes_between_the_same_pair():
@@ -546,9 +564,30 @@ def test_remove_and_rewire_metabolites_connects_the_enzymes():
     data = g["E1"]["E2"]
     assert data["interaction"] == "positive-influence"
     assert data["reaction_id"] == ["R1", "R2"]
-    assert data["note"] == "rewired through B"
-    # from E1 -> B (E1 the catalyst), and B -> E2 (the consumption edge E2 -| B read the other way)
-    assert (data["source_role"], data["target_role"]) == ("catalyst", "catalyst")
+    assert data["note"] == ["rewired through B", "rewired through B"]
+    # E1's role in R1 (E1 -> B), E2's in R2 (the consumption edge E2 -| B read the other way)
+    assert data["source_role"] == ["catalyst", None]
+    assert data["target_role"] == [None, "catalyst"]
+
+
+def test_remove_and_rewire_per_reaction_of_merged_edges():
+    """E2 -> B merged from E2's consumption of B (R2) and an activation of B (R7): rewired as
+    each, so E2 is upstream of B's targets (through R7), not only fed by B (through R2)"""
+    g = nx.MultiDiGraph()
+    g.add_nodes_from(_pathway().nodes(data=True))
+    for u, v, d in _pathway().edges(data=True):
+        g.add_edge(u, v, key=d["reaction_id"], **d)
+    g.add_node("D", node_type="PlantCoding")
+    g.add_edge("E2", "B", key="R7", **_base_edge("R7", "activation"))
+    g.add_edge("B", "D", key="R8", **_base_edge("R8", "activation"))
+    h = simplify_pss(g)
+    assert h["E2"]["B"]["reaction_type"] == ["catalysis", "protein activation"]
+
+    remove_and_rewire(h, ["B"])
+
+    assert h["E2"]["D"]["reaction_id"] == ["R7", "R8"]
+    assert h["E1"]["E2"]["reaction_id"] == ["R1", "R2"]  # B feeds E2 (R2)
+    assert not h.has_edge("E1", "C")  # C is made by E2
 
 
 def test_remove_and_rewire_catalysis_substrate_kept():
@@ -806,6 +845,17 @@ def test_remove_reactions_merged_edges_keep_other_reactions():
     assert list(g.edges(data="reaction_id")) == [("S", "P", ["rx2"])]
 
 
+def test_remove_reactions_merged_edges_keep_the_values_of_the_other_reactions():
+    g = simplify_pss(_conflicting_edges())
+
+    remove_reactions(g, ["rx3"])
+
+    assert g["B"]["C"]["reaction_id"] == ["rx4"]
+    assert g["B"]["C"]["reaction_type"] == ["catalysis"]
+    # the summary values stay as they were
+    assert g["B"]["C"]["interaction"] == "unknown-influence"
+
+
 def test_remove_reactions_single_string():
     g = _species_network()
     remove_reactions(g, "rx1")
@@ -887,14 +937,15 @@ def test_simplify_pss_reports_a_summary(caplog):
     with caplog.at_level("INFO", logger="skm_tools"):
         simplify_pss(_conflicting_edges())
     assert len(caplog.records) == 1
-    assert "interaction (2)" in caplog.text and "reaction_type (1)" in caplog.text
+    assert "interaction (2)" in caplog.text
+    assert "reaction_type" not in caplog.text  # kept per reaction
 
 
 def test_simplify_pss_verbose_reports_every_edge(caplog):
     with caplog.at_level("INFO", logger="skm_tools"):
         simplify_pss(_conflicting_edges(), verbose=True)
     assert "['rx1', 'rx2'] --> interaction" in caplog.text
-    assert "['rx3', 'rx4'] --> reaction_type" in caplog.text
+    assert "['rx3', 'rx4'] --> interaction" in caplog.text
 
 
 def test_simplify_pss_no_report_without_differences(caplog):
@@ -915,8 +966,38 @@ def test_simplify_pss_merge_rule():
                rank=0, reaction_type="catalysis", forms=["x"])
     h = simplify_pss(g)
     assert h["A"]["B"] == {"reaction_id": ["rx1", "rx2"], "interaction": "unknown-influence",
-                           "directed": True, "rank": 0, "reaction_type": "catalysis", "forms": ["x"]}
+                           "directed": True, "rank": 0, "reaction_type": ["catalysis", "binding"],
+                           "forms": [["x"], ["x"]]}
     assert h.graph == {"pss_network": "interaction_network"}
+
+
+def test_simplify_pss_per_reaction_lists():
+    g = _conflicting_edges()
+    g["A"]["B"]["rx1"]["influence_sbo"] = "SBO:0000170"
+    g["A"]["B"]["rx2"]["influence_sbo"] = "SBO:0000169"
+    g.add_edge("C", "D", key="rx5", reaction_id="rx5", interaction="positive-influence",
+               reaction_type="catalysis")
+
+    h = simplify_pss(g)
+
+    # each reaction's values, in reaction_id order; the influence of each reaction
+    assert h["A"]["B"]["influence_sbo"] == ["SBO:0000170", "SBO:0000169"]
+    assert h["A"]["B"]["interaction"] == "unknown-influence"
+    assert h["B"]["C"]["reaction_type"] == ["binding", "catalysis"]
+    # lists for edges of one reaction too; the summary attributes single values
+    assert h["C"]["D"] == {"reaction_id": ["rx5"], "reaction_type": ["catalysis"],
+                           "interaction": "positive-influence"}
+
+
+def test_simplify_pss_split_on_attrs_keep_one_value():
+    g = _make_multigraph(["activation", "activation", "inhibition"])
+
+    h = simplify_pss(g, split_on_attrs="reaction_effect")
+
+    assert sorted((d["reaction_effect"], d["reaction_id"]) for d in h["A"]["B"].values()) == [
+        ("activation", ["R0", "R1"]), ("inhibition", ["R2"])]
+    assert all(d["source_role"] == ["modifier"] * len(d["reaction_id"])
+               for d in h["A"]["B"].values())
 
 
 def test_simplify_pss_rejects_simple_graph():
@@ -936,6 +1017,16 @@ class TestMetabolismAndPathways:
             assert any(d["reaction_type"] == "catalysis" and d["source_role"] == "catalyst"
                        and d["target_role"] == {"producer": "product", "consumer": "substrate"}[r.role]
                        for d in edges)
+
+    def test_metabolite_enzymes_after_simplify(self, pss_gene_network_ath_edge_path,
+                                               pss_gene_network_ath_node_path):
+        from skm_tools.pss import metabolite_enzymes, pss_gene_network_to_networkx
+        g = pss_gene_network_to_networkx(pss_gene_network_ath_edge_path, pss_gene_network_ath_node_path)
+        m = metabolite_enzymes(g)
+        pd_testing = pytest.importorskip("pandas.testing")
+        pd_testing.assert_frame_equal(
+            metabolite_enzymes(simplify_pss(g)).sort_values(list(m.columns)).reset_index(drop=True),
+            m.sort_values(list(m.columns)).reset_index(drop=True))
 
     def test_metabolite_enzymes_toy(self):
         from skm_tools.pss import metabolite_enzymes
