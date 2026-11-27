@@ -68,11 +68,13 @@ def silence_py4cytoscape(silence=True):
 
     py4cytoscape prints the text of every error it raises, also of errors that are caught
     and handled (e.g. the retries in :func:`clone_network`), and prints progress messages
-    in notebooks. Silenced when this module is imported. The errors are still raised,
+    in notebooks, and its log of every request reaches the console when the root logger
+    has a handler (e.g. after ``logging.basicConfig()``). Silenced when this module is
+    imported. The errors are still raised,
     usually with the same text. But when Cytoscape's error response isn't JSON,
     py4cytoscape prints the response and raises a plain ``HTTPError`` ("500 Server Error
     ... for url ..."): silenced, Cytoscape's message is then only in py4cytoscape's log file
-    (``logs/py4cytoscape.log`` in the working directory, not affected by this). When
+    (``logs/py4cytoscape.log`` in the working directory, which still gets everything). When
     debugging, call ``silence_py4cytoscape(False)``.
 
     Parameters
@@ -97,11 +99,20 @@ def silence_py4cytoscape(silence=True):
             setattr(module, name, _quiet_wrapper(name, _P4C_ORIGINAL[name]))
 
     summary = logging.getLogger("py4...S")
+    # the detail log (every request, DEBUG) goes to py4cytoscape's log file; it also
+    # propagates to the root logger, so with a root handler (logging.basicConfig, e.g. to
+    # see skm-tools' messages) it fills the console
+    detail = logging.getLogger("py4...")
     if silence:
         _P4C_ORIGINAL.setdefault("summary_level", summary.level)
+        _P4C_ORIGINAL.setdefault("detail_propagate", detail.propagate)
         summary.setLevel(logging.CRITICAL)
-    elif "summary_level" in _P4C_ORIGINAL:
-        summary.setLevel(_P4C_ORIGINAL["summary_level"])
+        detail.propagate = False
+    else:
+        if "summary_level" in _P4C_ORIGINAL:
+            summary.setLevel(_P4C_ORIGINAL["summary_level"])
+        if "detail_propagate" in _P4C_ORIGINAL:
+            detail.propagate = _P4C_ORIGINAL["detail_propagate"]
 
 
 silence_py4cytoscape()

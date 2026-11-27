@@ -1,5 +1,6 @@
 """Cytoscape helpers, with py4cytoscape mocked: no running Cytoscape needed."""
 
+import logging
 from unittest.mock import MagicMock, patch
 
 import networkx as nx
@@ -380,6 +381,31 @@ def test_silence_py4cytoscape(capsys):
 
     e = CyError("silenced again")
     assert capsys.readouterr().err == "" and "silenced again" in str(e)
+
+
+def test_silence_py4cytoscape_detail_log_not_on_root_handler():
+    # e.g. logging.basicConfig() to see skm-tools' messages: py4cytoscape's detail log
+    # (every request, DEBUG) doesn't reach the root handler while silenced
+    records = []
+
+    class Collect(logging.Handler):
+        def emit(self, record):
+            records.append(record.getMessage())
+
+    root, handler = logging.getLogger(), Collect()
+    root.addHandler(handler)
+    detail = logging.getLogger("py4...")
+    try:
+        detail.debug("Calling cytoscape_ping()")
+        assert records == []
+
+        cu.silence_py4cytoscape(False)
+        detail.debug("Calling cytoscape_ping()")
+        assert records == ["Calling cytoscape_ping()"]
+    finally:
+        cu.silence_py4cytoscape(True)
+        root.removeHandler(handler)
+    assert not detail.propagate
 
 
 def test_set_style_makes_network_current_first(p4c):
