@@ -1,12 +1,12 @@
 cff-version: 1.2.0
 message: "If you use this software, please cite it as below."
 authors:
-- family-names: "Carissa"
-  given-names: "Bleker"
+- family-names: "Bleker"
+  given-names: "Carissa"
   orcid: "https://orcid.org/0000-0003-1617-7145"
 title: "skm-tools"
-version: 0.1
-date-released: 2024-10-16
+version: 0.2.0
+date-released: 2026-11-27
 url: "https://github.com/NIB-SI/skm-tools/"
 preferred-citation:
   type: article
