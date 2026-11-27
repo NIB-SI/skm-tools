@@ -32,7 +32,7 @@ tutorials = ["matplotlib", "py4cytoscape", "ipykernel"]
 
 # for development
 docs = ["sphinx", "sphinx-rtd-theme", "sphinx-autoapi", "nbsphinx", "nbsphinx-link", "ipython"]
-test = ["pytest>=7.0"]
+test = ["pytest>=7.0", "statsmodels"]   # statsmodels: reference for bh_fdr
 
 [tool.setuptools.packages.find]
 include = ["skm_tools*"]

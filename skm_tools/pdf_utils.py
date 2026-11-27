@@ -109,10 +109,10 @@ def combine_pdfs(files, filename, captions=None, font_size=20, font="Helvetica")
             if captions is not None:
                 # room for the caption below
                 path = crop_pdf(path, Path(tmp) / f"{i}.pdf", margins=(0, font_size, 0, 0))
-            page = PdfReader(path).pages[0]
+            # merged once in the writer (pypdf 7 no longer changes pages outside a writer)
+            page = writer.add_page(PdfReader(path).pages[0])
             if captions is not None:
                 page.merge_page(_caption_page(captions[i], page.cropbox, font, font_size))
-            writer.add_page(page)
 
         filename = Path(filename)
         with open(filename, "wb") as handle:
