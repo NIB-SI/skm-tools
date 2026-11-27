@@ -88,6 +88,35 @@ in the graph count, so filter the ranks first if needed.
 
    tfs = transcription_factors(ckn, mapman_bins="14.5")
 
+Augmenting PSS with CKN
+=======================
+
+:mod:`skm_tools.augment_pss` (by Vid Modic) adds to PSS the CKN interactions around its genes, and
+lists what they add: which PSS genes CKN connects that PSS doesn't. Use the PSS gene network of
+Arabidopsis, whose nodes are gene ids, as in CKN.
+
+:func:`~skm_tools.augment_pss.build_augmented_pss` adds the CKN edges that touch a PSS node (but
+not between two PSS nodes that PSS already links, in either direction), and the CKN edges among the
+CKN nodes they bring in (``between_added=False``: not those). Every node and edge gets an
+``origin``, ``"PSS"`` or ``"CKN"``. Then :func:`~skm_tools.augment_pss.find_new_direct_edges` lists
+the PSS node pairs with a CKN edge but no PSS edge, and
+:func:`~skm_tools.augment_pss.find_new_intermediate_pairs` those connected through one CKN node,
+with the CKN ranks. :func:`~skm_tools.augment_pss.extract_pair_subnetwork` and
+:func:`~skm_tools.augment_pss.extract_node_neighbourhood` give small subnetworks to inspect, e.g. in
+Cytoscape with :func:`~skm_tools.augment_pss.show_augmented` (coloured by origin).
+
+.. code-block:: python
+
+   from skm_tools.augment_pss import build_augmented_pss, find_new_direct_edges, find_new_intermediate_pairs
+   from skm_tools.pss import pss_gene_network_to_networkx
+
+   pss_ath = pss_gene_network_to_networkx(species="ath")
+   augmented = build_augmented_pss(pss_ath, ckn)
+   direct = find_new_direct_edges(augmented, pss_ath, max_rank=1)       # u, v, rank, direction
+   via = find_new_intermediate_pairs(augmented, pss_ath, max_rank=1)    # u, v, intermediate, ranks
+
+See the tutorial :doc:`tutorials/tutorial-augment`.
+
 MapMan annotations
 ==================
 

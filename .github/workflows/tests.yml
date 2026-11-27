@@ -44,7 +44,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        notebook: [tutorial-pss, tutorial-ckn, tutorial-heatmaps]
+        notebook: [tutorial-pss, tutorial-ckn, tutorial-augment, tutorial-heatmaps]
     steps:
       - uses: actions/checkout@v4
 
